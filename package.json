@@ -1,0 +1,35 @@
+{
+  "name": "salonpro",
+  "private": true,
+  "version": "1.0.0",
+  "description": "SalonPro — premium salon management platform (customer PWA + owner dashboard + staff console)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c yellow,cyan \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm --workspace @salonpro/api run dev",
+    "dev:web": "npm --workspace @salonpro/web run dev",
+    "build": "npm --workspace @salonpro/web run build",
+    "build:admin": "npm --workspace @salonpro/web run build:admin",
+    "start": "npm --workspace @salonpro/api run start",
+    "serve": "npm run build && npm run start",
+    "seed": "npm --workspace @salonpro/api run seed",
+    "test": "npm --workspace @salonpro/shared run test && npm --workspace @salonpro/api run test && npm --workspace @salonpro/web run test",
+    "test:api": "npm --workspace @salonpro/api run test",
+    "test:shared": "npm --workspace @salonpro/shared run test",
+    "test:web": "npm --workspace @salonpro/web run test",
+    "typecheck": "npm --workspace @salonpro/api run typecheck && npm --workspace @salonpro/web run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.25.12": true
+  }
+}

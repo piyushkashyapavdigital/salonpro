@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SalonPro Admin</string>
+    <string name="title_activity_main">SalonPro Admin</string>
+    <string name="package_name">com.salonpro.admin</string>
+    <string name="custom_url_scheme">com.salonpro.admin</string>
+</resources>

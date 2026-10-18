@@ -1,0 +1,47 @@
+# --- dependencies -----------------------------------------------------------
+node_modules/
+.pnp
+.pnp.js
+
+# --- build output -----------------------------------------------------------
+dist/
+dist-admin/
+build/
+*.tsbuildinfo
+coverage/
+
+# --- local database (recreate with `npm run seed -- --reset`) ---------------
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+data/uploads/
+
+# --- Capacitor / Gradle -----------------------------------------------------
+# Web assets are copied into the native projects by `npx cap sync`.
+apps/*/android/app/src/main/assets/public/
+apps/*/android/app/build/
+apps/*/android/build/
+apps/*/android/.gradle/
+apps/*/android/local.properties
+apps/*/android/capacitor-cordova-android-plugins/
+
+# Signing material must never be committed.
+*.keystore
+*.jks
+keystore.properties
+
+# --- environment ------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- editors / OS -----------------------------------------------------------
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# --- logs -------------------------------------------------------------------
+*.log
+npm-debug.log*
