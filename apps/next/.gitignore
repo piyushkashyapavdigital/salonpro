@@ -1,0 +1,11 @@
+# Next.js build output
+.next/
+out/
+next-env.d.ts
+
+# The built SPA is copied here by scripts/build-next.sh — never committed
+public/site/
+
+# Vercel local state
+.vercel
+.env*.local

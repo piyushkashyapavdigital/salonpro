@@ -1,0 +1,57 @@
+# Reminder jobs.
+#
+# Vercel's free plan runs cron once a day, which is not enough for "day 7/14/30
+# since your last visit" reminders; scheduled GitHub Actions are free in a public
+# repository and run this every 15 minutes instead. The Vercel entry in
+# `apps/next/vercel.json` stays as a backstop for the days GitHub pauses
+# scheduled workflows in an inactive repository.
+#
+# Setup (once):
+#   1. Repository → Settings → Secrets and variables → Actions
+#      • Variable  SALONPRO_API_URL = https://<your-app>.vercel.app
+#      • Secret    CRON_SECRET      = the same value you set in Vercel
+#   2. Vercel → Project → Settings → Environment Variables → CRON_SECRET
+#
+# Until both are set this workflow reports a warning and exits successfully, so
+# a fresh clone is not a wall of red.
+name: reminders
+
+on:
+  schedule:
+    # Every 15 minutes: the day 7/14/30 reminder passes.
+    - cron: '*/15 * * * *'
+    # 09:00 IST: tomorrow's appointment reminders.
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: reminders
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run reminder jobs
+        env:
+          API_URL: ${{ vars.SALONPRO_API_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${API_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "::warning::SALONPRO_API_URL (repository variable) or CRON_SECRET (secret) is not set — skipping."
+            exit 0
+          fi
+
+          echo "→ reminder sweep"
+          curl -fsS --max-time 120 -X POST "${API_URL}/api/internal/reminders" \
+            -H "Authorization: Bearer ${CRON_SECRET}"
+          echo
+
+          if [ "${{ github.event.schedule }}" = "30 3 * * *" ]; then
+            echo "→ appointment reminders (tomorrow)"
+            curl -fsS --max-time 120 -X POST "${API_URL}/api/internal/reminders/appointments" \
+              -H "Authorization: Bearer ${CRON_SECRET}"
+            echo
+          fi

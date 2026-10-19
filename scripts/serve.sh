@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# SalonPro API launcher — frees the port, then starts exactly one API server.
+# SalonPro server launcher — frees the port, then starts the Next.js server
+# (the API *and* the web app on one origin).
 #
-#   bash scripts/serve.sh            # free :4000, then start (Ctrl+C to stop)
+#   bash scripts/serve.sh            # free :4000, build if needed, then start
 #   PORT=4100 bash scripts/serve.sh  # use another port
+#   SKIP_BUILD=1 bash scripts/serve.sh   # start the existing build untouched
 #
 # Use this instead of a bare `npm start` when you are not sure whether an older
 # server is still running: it stops the stale one first instead of failing with
@@ -20,10 +22,12 @@ PORT="${PORT:-4000}"
 if command -v fuser >/dev/null 2>&1; then
   fuser -k "${PORT}/tcp" >/dev/null 2>&1 || true
 fi
-# Stale `npm start` servers. The bracket keeps the pattern from matching this
-# script's own command line.
-pkill -f "[t]sx src/index.ts" >/dev/null 2>&1 || true
-pkill -f "[s]alonpro/api"     >/dev/null 2>&1 || true
+# Stale servers (Next keeps a titled child process). The bracket keeps the
+# pattern from matching this script's own command line.
+pkill -f "[n]ext start"          >/dev/null 2>&1 || true
+pkill -f "[n]ext-server"         >/dev/null 2>&1 || true
+pkill -f "[t]sx src/index.ts"    >/dev/null 2>&1 || true
+pkill -f "[s]alonpro/api"        >/dev/null 2>&1 || true
 
 # Give the OS a moment to release the socket.
 for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -38,18 +42,29 @@ if ss -ltn 2>/dev/null | grep -q ":${PORT} "; then
   exit 1
 fi
 
-# --- 2. show the address the phone / APK talks to ----------------------------
+# --- 2. build when there is no usable build ----------------------------------
+if [ "${SKIP_BUILD:-0}" != "1" ] && [ ! -f apps/next/.next/BUILD_ID ]; then
+  echo "No Next.js build found — building (this takes a minute; Ctrl+C to skip"
+  echo "and run 'npm run dev' for the fast dev server instead)."
+  echo
+  bash scripts/build-next.sh
+  echo
+fi
+
+# --- 3. show the address the phone / APK talks to ----------------------------
 LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-echo "SalonPro API starting on port ${PORT}"
+echo "SalonPro starting on port ${PORT}"
 if [ -n "${LAN_IP:-}" ]; then
-  echo "  on this PC    : http://127.0.0.1:${PORT}"
-  echo "  on your phone : http://${LAN_IP}:${PORT}   <- what the APK calls"
-  echo "                  (phone must be on the same Wi-Fi)"
+  echo "  API  on this PC    : http://127.0.0.1:${PORT}/api/health"
+  echo "  API  on your phone : http://${LAN_IP}:${PORT}   <- what the APK calls"
+  echo "                       (phone must be on the same Wi-Fi)"
+  echo "  Web  on this PC    : http://127.0.0.1:${PORT}/app"
 else
-  echo "  http://127.0.0.1:${PORT}"
+  echo "  API  http://127.0.0.1:${PORT}/api/health"
+  echo "  Web  http://127.0.0.1:${PORT}/app"
 fi
 echo "  stop with Ctrl+C"
 echo
 
-# --- 3. start ----------------------------------------------------------------
-exec npm start
+# --- 4. start ----------------------------------------------------------------
+PORT="$PORT" exec npm start
