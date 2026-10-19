@@ -145,10 +145,10 @@ export function HomeScreen() {
           )}
 
           <View style={styles.quickRow}>
-            <QuickAction icon="content-cut" label="Book" onPress={() => navigation.navigate('Book')} />
-            <QuickAction icon="local-offer" label="Offers" onPress={() => navigation.navigate('Offers')} />
-            <QuickAction icon="card-giftcard" label="Refer" onPress={() => navigation.navigate('Referral')} />
-            <QuickAction icon="receipt-long" label="History" onPress={() => navigation.navigate('Visits')} />
+            <QuickAction icon="content-cut" label="Book" color={colors.brand500} soft={colors.brand50} onPress={() => navigation.navigate('Book')} />
+            <QuickAction icon="local-offer" label="Offers" color={colors.lilac} soft={colors.lilacSoft} onPress={() => navigation.navigate('Offers')} />
+            <QuickAction icon="card-giftcard" label="Refer" color={colors.mint} soft={colors.mintSoft} onPress={() => navigation.navigate('Referral')} />
+            <QuickAction icon="receipt-long" label="History" color={colors.sky} soft={colors.skySoft} onPress={() => navigation.navigate('Visits')} />
           </View>
 
           <SectionTitle title="Popular at the salon" action="All services" onAction={() => navigation.navigate('Book')} />
@@ -246,11 +246,11 @@ export function HomeScreen() {
   );
 }
 
-function QuickAction({ icon, label, onPress }: { icon: string; label: string; onPress: () => void }) {
+function QuickAction({ icon, label, color, soft, onPress }: { icon: string; label: string; color: string; soft: string; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={styles.quick}>
-      <View style={styles.quickIcon}>
-        <MaterialIcons name={icon} size={20} color={colors.brand700} />
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.quick, pressed && styles.quickPressed]}>
+      <View style={[styles.quickIcon, { backgroundColor: soft }]}>
+        <MaterialIcons name={icon} size={20} color={color} />
       </View>
       <Text style={styles.quickLabel}>{label}</Text>
     </Pressable>
@@ -262,12 +262,12 @@ const styles = StyleSheet.create({
   hero: { paddingHorizontal: space(5), paddingTop: space(3), paddingBottom: space(6), borderBottomLeftRadius: 30, borderBottomRightRadius: 30 },
   heroTop: { flexDirection: 'row', alignItems: 'center', gap: space(3) },
   hello: { color: colors.white, fontSize: font.size.xl, fontWeight: font.weight.heavy, letterSpacing: -0.4 },
-  heroSub: { color: '#FBDFEB', fontSize: font.size.sm, marginTop: 2 },
+  heroSub: { color: '#EADCF6', fontSize: font.size.sm, marginTop: 2 },
   bell: { width: 40, height: 40, borderRadius: radius.pill, backgroundColor: '#ffffff26', alignItems: 'center', justifyContent: 'center' },
   walletCard: { marginTop: space(5), backgroundColor: '#ffffff1f', borderRadius: radius.lg, padding: space(4), flexDirection: 'row', alignItems: 'center', gap: space(3) },
-  walletLabel: { color: '#FBDFEB', fontSize: font.size.xs, textTransform: 'uppercase', letterSpacing: 0.6 },
+  walletLabel: { color: '#EADCF6', fontSize: font.size.xs, textTransform: 'uppercase', letterSpacing: 0.6 },
   walletValue: { color: colors.white, fontSize: font.size.xxl, fontWeight: font.weight.heavy, marginTop: 2, letterSpacing: -0.6 },
-  walletSplit: { color: '#F6C9DD', fontSize: font.size.xs, marginTop: 2 },
+  walletSplit: { color: '#D8C7EC', fontSize: font.size.xs, marginTop: 2 },
   recharge: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: space(1), backgroundColor: colors.white, borderRadius: radius.pill, paddingHorizontal: space(3), paddingVertical: space(2) },
   rechargeText: { color: colors.brand700, fontWeight: font.weight.bold, fontSize: font.size.xs },
   loyaltyRow: { flexDirection: 'row', alignItems: 'center', gap: space(2), marginTop: space(3) },
@@ -286,7 +286,8 @@ const styles = StyleSheet.create({
   visitPay: { fontSize: font.size.xs, color: colors.ink500 },
   quickRow: { flexDirection: 'row', gap: space(2), marginTop: space(1) },
   quick: { flex: 1, alignItems: 'center', gap: space(1.5), backgroundColor: colors.white, borderRadius: radius.lg, paddingVertical: space(3), ...shadow.card },
-  quickIcon: { width: 38, height: 38, borderRadius: radius.pill, backgroundColor: colors.brand50, alignItems: 'center', justifyContent: 'center' },
+  quickPressed: { transform: [{ scale: 0.96 }], opacity: 0.9 },
+  quickIcon: { width: 38, height: 38, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   quickLabel: { fontSize: font.size.xs, color: colors.ink700, fontWeight: font.weight.semibold },
   popularRow: { gap: space(3), paddingVertical: space(1) },
   popularCard: { width: 156, backgroundColor: colors.white, borderRadius: radius.lg, padding: space(3.5), gap: space(1), ...shadow.card },

@@ -1,5 +1,5 @@
 /**
- * More: everything that is not an everyday tab — reports, the team, the service
+ * More: everything that is not an everyday tab — reports, the staff, the service
  * menu, offers, reminders, settings and the server address.
  *
  * Rows are hidden when the signed-in role cannot use them, so nobody taps into a
@@ -67,7 +67,7 @@ export function MoreScreen() {
         <Card padded={false}>
           <MenuRow icon="content-cut" label="Services & prices" onPress={() => navigation.navigate('Services')} />
           {can('viewStaff') || can('manageStaff') ? (
-            <MenuRow icon="badge" label="Team & attendance" onPress={() => navigation.navigate('Staff')} />
+            <MenuRow icon="badge" label="Staff & attendance" onPress={() => navigation.navigate('Staff')} />
           ) : null}
           <MenuRow icon="local-offer" label="Offers, coupons & referrals" onPress={() => navigation.navigate('Offers')} />
           <MenuRow icon="notifications-active" label="Reminders & messages" onPress={() => navigation.navigate('Reminders')} />

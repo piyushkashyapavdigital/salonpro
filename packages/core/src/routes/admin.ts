@@ -753,6 +753,18 @@ adminRouter.post(
     const { salonId } = await scope(req);
     const body = staffSchema.parse(req.body);
     if (!body.userId && (!body.name || !body.phone)) throw badRequest('Provide a name and phone, or an existing user.');
+    /* A simple add should just work: fall back to the salon's branch and a
+     * sensible role/title so the owner only has to give a name and number. */
+    if (!body.branchId) {
+      const fallback = await one<{ id: string }>(
+        "SELECT id FROM branches WHERE salonId = ? AND status = 'active' ORDER BY name LIMIT 1",
+        salonId,
+      );
+      if (!fallback) throw badRequest('Create a branch before adding staff.');
+      body.branchId = fallback.id;
+    }
+    body.designation = body.designation ?? 'Stylist';
+    const role = body.role ?? 'salon_staff';
     let userId = body.userId;
     const now = new Date().toISOString();
     if (!userId) {
@@ -762,7 +774,7 @@ adminRouter.post(
       else {
         userId = crypto.randomUUID();
         await run('INSERT INTO users (id, name, phone, role, status, isDemo, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?)',
-          userId, body.name!, phone, 'salon_staff', 'active', 0, now, now);
+          userId, body.name!, phone, role, 'active', 0, now, now);
       }
     }
     const staffId = crypto.randomUUID();

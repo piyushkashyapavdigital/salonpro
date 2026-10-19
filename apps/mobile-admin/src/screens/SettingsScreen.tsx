@@ -288,7 +288,7 @@ export function SettingsScreen() {
                     fg={branch.status === 'active' ? colors.mint : colors.ink600}
                   />
                 </View>
-                <Row label="Team" value={`${branch.staffCount} people`} />
+                <Row label="Staff" value={`${branch.staffCount} people`} />
                 <Row label="Customers served" value={String(branch.customers)} />
                 <Row label="Appointments" value={String(branch.appointments)} />
                 <Row label="Revenue all time" value={formatMoney(branch.revenue)} />

@@ -1,16 +1,17 @@
 /**
- * The team: who is on the floor, who is in today, and how to add someone.
+ * The staff: who is on the floor, who is in today, and how to add someone.
  *
- * Attendance is recorded per day by the server (one row per staff member per day),
- * and adding a colleague goes through the invite endpoint — an invited person
- * signs in with their own phone and the role the owner gave them.
+ * Attendance is recorded per day by the server (one row per staff member per
+ * day). Adding someone is a plain add — name, number, role — there is no
+ * invitation to send; the person then signs in to this app with their number
+ * and a one-time code.
  */
 import React, { useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { admin, auth, catalog } from '../shared/endpoints';
+import { admin, catalog } from '../shared/endpoints';
 import { errorMessage, useAsync } from '../shared/hooks';
 import { useAuth } from '../shared/auth';
 import { Avatar, Badge, Banner, Button, Card, Chip, Empty, Field, Loading, Row, SectionTitle } from '../shared/components';
@@ -18,6 +19,13 @@ import { colors, font, radius, shadow, space } from '../shared/theme';
 import { isoDate } from '../core';
 
 const ATTENDANCE = ['present', 'absent', 'leave', 'half_day'] as const;
+
+/** The roles the owner can hand out, in plain words. */
+const ROLES = [
+  { value: 'salon_staff', label: 'Stylist' },
+  { value: 'receptionist', label: 'Receptionist' },
+  { value: 'branch_manager', label: 'Manager' },
+] as const;
 
 export function StaffScreen() {
   const navigation = useNavigation<any>();
@@ -28,11 +36,11 @@ export function StaffScreen() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [invite, setInvite] = useState({ name: '', phone: '', role: 'salon_staff', branchId: '' });
-  const [inviteBusy, setInviteBusy] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [form, setForm] = useState({ name: '', phone: '', role: 'salon_staff' as (typeof ROLES)[number]['value'], branchId: '' });
+  const [addBusy, setAddBusy] = useState(false);
 
-  const canManage = ['salon_owner', 'super_admin'].includes(user?.role ?? '');
+  const canManage = ['salon_owner', 'super_admin', 'branch_manager'].includes(user?.role ?? '');
 
   const mark = async (staffId: string, status: (typeof ATTENDANCE)[number]) => {
     setBusy(staffId);
@@ -49,32 +57,32 @@ export function StaffScreen() {
     }
   };
 
-  const sendInvite = async () => {
-    if (invite.name.trim().length < 2 || invite.phone.replace(/\D/g, '').length !== 10) {
-      setError('Enter the team member’s name and 10 digit phone number.');
+  const addStaff = async () => {
+    const phone = form.phone.replace(/\D/g, '').slice(-10);
+    if (form.name.trim().length < 2 || phone.length !== 10) {
+      setError('Enter the staff member’s name and 10 digit mobile number.');
       return;
     }
-    setInviteBusy(true);
+    setAddBusy(true);
     setError(null);
     setMessage(null);
     try {
-      const result = await auth.invite({
-        name: invite.name.trim(),
-        phone: invite.phone.replace(/\D/g, '').slice(-10),
-        role: invite.role,
-        ...(invite.branchId ? { branchId: invite.branchId } : {}),
+      const roleLabel = ROLES.find((r) => r.value === form.role)?.label ?? 'Stylist';
+      await admin.createStaff({
+        name: form.name.trim(),
+        phone,
+        role: form.role,
+        designation: roleLabel,
+        ...(form.branchId ? { branchId: form.branchId } : {}),
       });
-      setMessage(
-        result.message ??
-          'Invitation recorded. The person signs in with this phone number and a one-time code, and lands with the role you chose.',
-      );
-      setInviteOpen(false);
-      setInvite({ name: '', phone: '', role: 'salon_staff', branchId: '' });
+      setMessage(`${form.name.trim()} is on the staff list. They sign in here with ${phone} and a one-time code.`);
+      setAddOpen(false);
+      setForm({ name: '', phone: '', role: 'salon_staff', branchId: '' });
       await staff.reload();
     } catch (err) {
       setError(errorMessage(err));
     } finally {
-      setInviteBusy(false);
+      setAddBusy(false);
     }
   };
 
@@ -85,10 +93,10 @@ export function StaffScreen() {
       <View style={styles.head}>
         <MaterialIcons name="arrow-back" size={22} color={colors.ink800} onPress={() => navigation.goBack()} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.title}>Team</Text>
-          <Text style={styles.sub}>{rows.length} people on the books</Text>
+          <Text style={styles.title}>Staff</Text>
+          <Text style={styles.sub}>{rows.length} on the books</Text>
         </View>
-        {canManage ? <Button label="Add" size="sm" onPress={() => setInviteOpen((value) => !value)} /> : null}
+        {canManage ? <Button label={addOpen ? 'Close' : 'Add'} size="sm" onPress={() => setAddOpen((value) => !value)} /> : null}
       </View>
 
       <ScrollView
@@ -101,29 +109,31 @@ export function StaffScreen() {
         {message ? <Banner tone="success" message={message} /> : null}
         {staff.error ? <Banner tone="error" message={staff.error} action="Try again" onAction={staff.reload} /> : null}
 
-        {inviteOpen ? (
+        {addOpen ? (
           <Card>
-            <SectionTitle title="Add a team member" />
-            <Field label="Name" value={invite.name} onChangeText={(name) => setInvite((current) => ({ ...current, name }))} autoCapitalize="words" />
+            <SectionTitle title="Add staff member" />
+            <Field label="Name" value={form.name} onChangeText={(name) => setForm((c) => ({ ...c, name }))} autoCapitalize="words" placeholder="Meera" />
             <Field
               label="Mobile number"
-              value={invite.phone}
-              onChangeText={(phone) => setInvite((current) => ({ ...current, phone }))}
+              value={form.phone}
+              onChangeText={(phone) => setForm((c) => ({ ...c, phone }))}
               keyboardType="phone-pad"
               maxLength={14}
+              placeholder="98765 43210"
+              hint="They sign in to this app with this number."
             />
             <Text style={styles.label}>Role</Text>
             <View style={styles.chips}>
-              {['salon_staff', 'receptionist', 'branch_manager'].map((role) => (
+              {ROLES.map((role) => (
                 <Chip
-                  key={role}
-                  label={role.replace(/_/g, ' ')}
-                  active={invite.role === role}
-                  onPress={() => setInvite((current) => ({ ...current, role }))}
+                  key={role.value}
+                  label={role.label}
+                  active={form.role === role.value}
+                  onPress={() => setForm((c) => ({ ...c, role: role.value }))}
                 />
               ))}
             </View>
-            {(branches.data?.branches.length ?? 0) > 0 ? (
+            {(branches.data?.branches.length ?? 0) > 1 ? (
               <>
                 <Text style={styles.label}>Home branch</Text>
                 <View style={styles.chips}>
@@ -131,26 +141,26 @@ export function StaffScreen() {
                     <Chip
                       key={branch.id}
                       label={branch.name}
-                      active={invite.branchId === branch.id}
-                      onPress={() => setInvite((current) => ({ ...current, branchId: branch.id }))}
+                      active={form.branchId === branch.id}
+                      onPress={() => setForm((c) => ({ ...c, branchId: branch.id }))}
                     />
                   ))}
                 </View>
               </>
             ) : null}
-            <Button label={inviteBusy ? 'Saving…' : 'Send invitation'} loading={inviteBusy} onPress={() => void sendInvite()} style={{ marginTop: space(3) }} />
+            <Button label={addBusy ? 'Adding…' : 'Add staff member'} loading={addBusy} onPress={() => void addStaff()} style={{ marginTop: space(3) }} />
             <Text style={styles.note}>
-              Nothing is texted automatically beyond the sign-in code: the invitation appears in the audit log and the person can
-              sign in straight away.
+              No invitation is sent. The person can sign in right away with this number and a one-time code — on this demo
+              server the code is shown on screen because no SMS provider is configured.
             </Text>
           </Card>
         ) : null}
 
         {staff.loading && !staff.data ? (
-          <Loading label="Loading the team…" />
+          <Loading label="Loading staff…" />
         ) : rows.length === 0 ? (
           <Card>
-            <Empty icon="🧑‍🎨" title="No staff records" message="Add your stylists and front desk so bookings can be assigned." />
+            <Empty icon="🧑‍🎨" title="No staff yet" message="Add your stylists and front desk so bookings can be assigned." />
           </Card>
         ) : (
           rows.map((member) => {

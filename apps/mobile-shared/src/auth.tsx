@@ -10,6 +10,7 @@ import { initApiBase, initToken, onSignedOut, setToken } from './api';
 import { auth } from './endpoints';
 import type { SessionResponse } from './types';
 import type { SessionUser, Wallet } from '../core';
+import { ADMIN_ROLES } from '../core';
 
 interface AuthValue {
   /** False until the stored session has been read — screens show a splash. */
@@ -107,9 +108,13 @@ export function useAuth(): AuthValue {
   return value;
 }
 
-/** Roles that may open the admin app. */
-export const ADMIN_ROLES = ['salon_owner', 'branch_manager', 'receptionist', 'stylist', 'super_admin'];
+/**
+ * Roles that may open the admin app. Re-exported from the shared domain so the
+ * two can never drift — it includes `salon_staff`, the role a new staff member
+ * gets when the owner adds them.
+ */
+export { ADMIN_ROLES };
 
 export function isAdminRole(role: string | undefined): boolean {
-  return !!role && ADMIN_ROLES.includes(role);
+  return !!role && (ADMIN_ROLES as readonly string[]).includes(role);
 }

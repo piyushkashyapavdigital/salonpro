@@ -70,6 +70,7 @@ export const staffSchema = z.object({
   phone: z.string().optional(),
   branchId: z.string().min(1).optional(),
   designation: z.string().trim().min(2).max(60).optional(),
+  role: z.enum(['salon_staff', 'receptionist', 'branch_manager', 'salon_owner']).optional(),
   workingHours: z.record(z.object({ off: z.boolean(), start: timeSchema, end: timeSchema })).optional(),
   commissionRules: z.object({ serviceBps: z.number().int().min(0).max(10000), productBps: z.number().int().min(0).max(10000) }).optional(),
   status: z.enum(['active', 'inactive']).optional(),

@@ -83,6 +83,8 @@ export function GradientHeader({
 }) {
   return (
     <LinearGradient colors={gradient as unknown as string[]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
+      <View style={styles.headerBlob1} />
+      <View style={styles.headerBlob2} />
       <View style={styles.headerTop}>
         <View style={styles.flex}>
           <Text style={styles.headerTitle}>{title}</Text>
@@ -147,7 +149,10 @@ export function Divider({ spaced = true }: { spaced?: boolean }) {
 export function SectionTitle({ title, action, onAction }: { title: string; action?: string; onAction?: () => void }) {
   return (
     <View style={styles.sectionTitle}>
-      <Text style={styles.sectionTitleText}>{title}</Text>
+      <View style={styles.sectionTitleLeft}>
+        <View style={styles.sectionBar} />
+        <Text style={styles.sectionTitleText}>{title}</Text>
+      </View>
       {action ? (
         <Pressable onPress={onAction} hitSlop={8}>
           <Text style={styles.sectionAction}>{action}</Text>
@@ -470,12 +475,15 @@ const styles = StyleSheet.create({
     paddingBottom: space(6),
     borderBottomLeftRadius: radius.xl,
     borderBottomRightRadius: radius.xl,
+    overflow: 'hidden',
   },
+  headerBlob1: { position: 'absolute', top: -60, right: -30, width: 160, height: 160, borderRadius: 80, backgroundColor: '#ffffff22' },
+  headerBlob2: { position: 'absolute', bottom: -70, left: -20, width: 130, height: 130, borderRadius: 65, backgroundColor: '#00000011' },
   headerTop: { flexDirection: 'row', alignItems: 'center', gap: space(3) },
   headerTitle: { color: colors.white, fontSize: font.size.xl, fontWeight: font.weight.heavy, letterSpacing: -0.5 },
-  headerSubtitle: { color: '#FBDFEB', fontSize: font.size.sm, marginTop: 2 },
+  headerSubtitle: { color: '#EADCF6', fontSize: font.size.sm, marginTop: 2 },
 
-  card: { backgroundColor: colors.white, borderRadius: radius.lg, ...shadow.card },
+  card: { backgroundColor: colors.white, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.ink100, ...shadow.card },
   cardPad: { padding: space(4) },
   divider: { height: 1, backgroundColor: colors.ink100 },
 
@@ -490,6 +498,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: space(2),
   },
+  sectionTitleLeft: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
+  sectionBar: { width: 4, height: 18, borderRadius: 999, backgroundColor: colors.brand500 },
   sectionTitleText: { fontSize: font.size.lg, fontWeight: font.weight.bold, color: colors.ink900 },
   sectionAction: { color: colors.brand600, fontWeight: font.weight.semibold, fontSize: font.size.sm },
 

@@ -110,6 +110,6 @@ const styles = StyleSheet.create({
   action: { flex: 1 },
   footnote: { fontSize: font.size.xs, color: colors.ink400, marginTop: space(3) },
   line: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
-  lineLabel: { fontSize: font.size.xs, color: '#FBDFEB', textTransform: 'uppercase', letterSpacing: 0.4 },
+  lineLabel: { fontSize: font.size.xs, color: '#EADCF6', textTransform: 'uppercase', letterSpacing: 0.4 },
   lineValue: { fontSize: font.size.xs, color: colors.white, fontWeight: font.weight.semibold, flexShrink: 1 },
 });

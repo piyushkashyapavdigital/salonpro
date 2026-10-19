@@ -104,13 +104,13 @@ export const auth = {
 /* ------------------------------------------------------------------ */
 
 export const catalog = {
-  salon: () => api<CatalogSalonResponse>('/catalog/salon', { anonymous: true }),
-  branches: () => api<BranchesResponse>('/catalog/branches', { anonymous: true }),
+  salon: () => api<CatalogSalonResponse>('/catalog/salon'),
+  branches: () => api<BranchesResponse>('/catalog/branches'),
   cities: () => api<{ cities: string[] }>('/catalog/cities', { anonymous: true }),
-  services: () => api<ServicesResponse>('/catalog/services', { anonymous: true }),
-  staff: (branchId?: string) => api<StaffResponse>(`/catalog/staff${qs({ branchId })}`, { anonymous: true }),
-  rechargeOffers: () => api<RechargeOffersResponse>('/catalog/recharge-offers', { anonymous: true }),
-  coupons: () => api<CouponsResponse>('/catalog/coupons', { anonymous: true }),
+  services: () => api<ServicesResponse>('/catalog/services'),
+  staff: (branchId?: string) => api<StaffResponse>(`/catalog/staff${qs({ branchId })}`),
+  rechargeOffers: () => api<RechargeOffersResponse>('/catalog/recharge-offers'),
+  coupons: () => api<CouponsResponse>('/catalog/coupons'),
   referralInfo: (code: string) =>
     api<ReferralInfoResponse>(`/catalog/join/${encodeURIComponent(code)}`, { anonymous: true }),
 

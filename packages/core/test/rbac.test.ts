@@ -89,6 +89,35 @@ test('a manager cannot create an appointment for an unauthorised branch', async 
   assert.equal(res.status, 403);
 });
 
+test('adding staff is a simple add: a name and phone are enough', async () => {
+  const token = await h.login(ACCOUNTS.owner);
+  const res = await h.post<{ staffId: string }>('/admin/staff', { name: 'Meera Nair', phone: '9800000999' }, token);
+  assert.equal(res.status, 201, JSON.stringify(res.data));
+
+  const row = await h.db.one<{ branchId: string; designation: string }>(
+    'SELECT branchId, designation FROM staff WHERE id = ?',
+    res.data.staffId,
+  );
+  assert.ok(row?.branchId, 'a branch is chosen automatically when none is given');
+  assert.equal(row?.designation, 'Stylist', 'a sensible default title');
+
+  /* The new staff member gets an admin role, so they can sign in right away. */
+  const user = await h.db.one<{ role: string }>('SELECT role FROM users WHERE phone = ?', '9800000999');
+  assert.equal(user?.role, 'salon_staff');
+});
+
+test('the role the owner picks is applied when adding staff', async () => {
+  const token = await h.login(ACCOUNTS.owner);
+  const res = await h.post<{ staffId: string }>(
+    '/admin/staff',
+    { name: 'Ravi Front', phone: '9800000998', role: 'receptionist', designation: 'Front desk' },
+    token,
+  );
+  assert.equal(res.status, 201, JSON.stringify(res.data));
+  const user = await h.db.one<{ role: string }>('SELECT role FROM users WHERE phone = ?', '9800000998');
+  assert.equal(user?.role, 'receptionist');
+});
+
 test('a customer cannot verify another customer\'s payment order', async () => {
   const a = await h.login(ACCOUNTS.customer1);
   const wallet = await h.get<{ offers: any[] }>('/customer/wallet', a);
