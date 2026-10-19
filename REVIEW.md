@@ -1,7 +1,8 @@
 # SalonPro — Spec Review (SALONPRO.docx)
 
 A working review of the product specification, the gaps in it, and how the
-accompanying build (`apps/api`, `apps/web`) resolves or deliberately defers each
+accompanying build (`packages/core` served through `apps/next` on Vercel, plus
+`apps/web`, `apps/mobile-customer`, `apps/mobile-admin`) resolves or deliberately defers each
 one. Written to be read next to the spec: each section names the issue, gives the
 risk, and states the concrete decision taken in code.
 
@@ -112,7 +113,7 @@ never expires").
 sit; if bonus before cash, the customer gets the promotional value first.
 **Build decision:** explicit `settings.spendingOrder = ['bonus','cash']`. Bonus is
 always consumed first. This is asserted by tests
-(`apps/api/test/wallet.test.ts` → "promotional bonus is spent before cash").
+(`packages/core/test/wallet.test.ts` → "promotional bonus is spent before cash").
 
 ### 4.3 Recharge reversal / chargeback undefined
 **Spec:** silent.

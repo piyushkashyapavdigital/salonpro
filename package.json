@@ -5,7 +5,9 @@
   "description": "SalonPro — salon management platform (Next.js API on Vercel + customer & admin apps)",
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/next",
+    "apps/web",
+    "apps/admin"
   ],
   "scripts": {
     "dev": "concurrently -n api,web -c yellow,cyan \"npm:dev:api\" \"npm:dev:web\"",
@@ -24,7 +26,10 @@
     "typecheck": "npm --workspace @salonpro/core run typecheck && npm --workspace @salonpro/next run typecheck && npm --workspace @salonpro/web run typecheck",
     "seed:reset": "npm --workspace @salonpro/core run seed:reset",
     "seed:bootstrap": "npm --workspace @salonpro/core run bootstrap",
-    "test:smoke": "npm --workspace @salonpro/core run smoke"
+    "test:smoke": "npm --workspace @salonpro/core run smoke",
+    "mobile:sync": "bash scripts/sync-mobile-shared.sh",
+    "mobile:apks": "bash scripts/build-mobile-apks.sh",
+    "mobile:install": "bash scripts/install-apks.sh"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

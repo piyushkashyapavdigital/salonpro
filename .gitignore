@@ -42,6 +42,12 @@ keystore.properties
 .DS_Store
 Thumbs.db
 
+# --- APKs -------------------------------------------------------------------
+# Build them with `bash scripts/build-mobile-apks.sh`; they are large binaries,
+# so hand them out (GitHub releases, Drive) rather than committing them.
+artifacts/*.apk
+*.cxx/
+
 # --- logs -------------------------------------------------------------------
 *.log
 npm-debug.log*

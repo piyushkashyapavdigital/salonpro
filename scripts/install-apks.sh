@@ -11,16 +11,20 @@
 #   4. check the local API is reachable on :4000
 #
 # Build the APKs first (if missing) with:
-#   bash scripts/build-apk.sh --no-install
-#   bash scripts/build-apk.sh admin --no-install
+#   bash scripts/build-mobile-apks.sh          # React Native apps (the ones shipped)
+#   bash scripts/build-apk.sh --no-install     # legacy Capacitor PWA shell
 #
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-CUSTOMER_APK="apps/web/android/app/build/outputs/apk/debug/app-debug.apk"
-ADMIN_APK="apps/admin/android/app/build/outputs/apk/debug/app-debug.apk"
+# The React Native APKs in artifacts/ are the ones the salon installs; the
+# Capacitor PWA shells are the older packaging and are used only as a fallback.
+RN_CUSTOMER="artifacts/mobile-customer-1.0.0.apk"
+RN_ADMIN="artifacts/mobile-admin-1.0.0.apk"
+WEB_CUSTOMER="apps/web/android/app/build/outputs/apk/debug/app-debug.apk"
+WEB_ADMIN="apps/admin/android/app/build/outputs/apk/debug/app-debug.apk"
 
 if ! command -v adb >/dev/null 2>&1; then
   echo "ERROR: adb not found on PATH." >&2
@@ -56,15 +60,22 @@ install_one() {
   fi
 }
 
-install_one "$CUSTOMER_APK" "SalonPro (customer app)"
-install_one "$ADMIN_APK" "SalonPro Admin (dashboard)"
+pick() {
+  local name="$1" primary="$2" fallback="$3"
+  if [ -f "$primary" ]; then echo "$primary"
+  elif [ -f "$fallback" ]; then echo "$fallback"
+  else echo "$primary"; fi
+}
+
+install_one "$(pick customer "$RN_CUSTOMER" "$WEB_CUSTOMER")" "SalonPro (customer app)"
+install_one "$(pick admin "$RN_ADMIN" "$WEB_ADMIN")" "SalonPro Admin (staff app)"
 
 echo
-echo "==> [4/4] API check (phone must reach this PC's LAN IP on :4000)"
+echo "==> [4/4] API check (phone must reach this PC's LAN IP on whatever port the server prints)"
 if curl -s -o /dev/null --max-time 4 http://localhost:4000/api/health; then
   echo "    API is up on :4000 — you're good to go"
 else
-  echo "    API NOT reachable on :4000 — start it with:  npm start"
+  echo "    API NOT reachable on :4000 — start it with:  bash scripts/serve.sh"
 fi
 
 echo
