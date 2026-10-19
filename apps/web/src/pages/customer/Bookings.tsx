@@ -10,6 +10,7 @@ import {
   isoDate,
   type Appointment,
 } from '@salonpro/shared';
+import { api } from '../../lib/api';
 import { useApi, useApiMutation } from '../../lib/hooks';
 import { useToast } from '../../components/Toast';
 import { Alert, Button, Card, Drawer, EmptyState, Field, Input, LoadingBlock, Modal, StatusPill, Tabs } from '../../components/ui';
@@ -61,12 +62,13 @@ export default function Bookings() {
   const loadSlots = async (appointment: Appointment, date: string) => {
     setSlotsLoading(true);
     try {
-      const result = await fetch(
-        `/api/catalog/availability?branchId=${appointment.branchId}&date=${date}&serviceIds=${appointment.services
+      /* Through the API client, not a bare fetch: a relative URL cannot reach the
+       * server from inside the packaged app. */
+      const result = await api<{ slots: { startTime: string; endTime: string; staffId: string; staffName: string }[] }>(
+        `/catalog/availability?branchId=${appointment.branchId}&date=${date}&serviceIds=${appointment.services
           .map((s) => s.serviceId)
           .join(',')}${appointment.staffId ? `&staffId=${appointment.staffId}` : ''}`,
-        { headers: { authorization: `Bearer ${localStorage.getItem('salonpro.token')}` } },
-      ).then((r) => r.json());
+      );
       setSlots(result.slots ?? []);
     } catch {
       setSlots([]);

@@ -12,6 +12,7 @@ import {
   type Wallet,
   type WalletTransaction,
 } from '@salonpro/shared';
+import { api, downloadFile } from '../../lib/api';
 import { useApi, useApiMutation, useDebounced } from '../../lib/hooks';
 import { useToast } from '../../components/Toast';
 import {
@@ -79,7 +80,7 @@ export default function Customers() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => window.open('/api/admin/reports/customers.csv', '_blank')}
+            onClick={() => downloadFile('/admin/reports/customers.csv', 'salonpro-customers.csv')}
           >
             <IconDownload size={15} /> Export CSV
           </Button>
@@ -232,18 +233,17 @@ export default function Customers() {
                 checked={detail.data.profile.marketingConsent}
                 onChange={async (next) => {
                   try {
-                    await fetch(`/api/admin/customers/${selectedId}/consent`, {
+                    /* Through the API client: it signs the request and, crucially,
+                     * throws on a failed response instead of reporting a save that
+                     * never happened. */
+                    await api(`/admin/customers/${selectedId}/consent`, {
                       method: 'POST',
-                      headers: {
-                        'content-type': 'application/json',
-                        authorization: `Bearer ${localStorage.getItem('salonpro.token')}`,
-                      },
-                      body: JSON.stringify({ marketingConsent: next }),
+                      body: { marketingConsent: next },
                     });
                     toast.success(`Marketing consent ${next ? 'given' : 'withdrawn'}`);
                     detail.refetch();
-                  } catch {
-                    toast.error('Could not update consent');
+                  } catch (err) {
+                    toast.error('Could not update consent', err instanceof Error ? err.message : undefined);
                   }
                 }}
                 label="Marketing & promotional consent"

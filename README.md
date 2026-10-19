@@ -236,18 +236,35 @@ bash scripts/build-apk.sh admin           # admin app    -> com.salonpro.admin
 bash scripts/build-apk.sh admin --no-install
 ```
 
-Each APK bakes in the API base at build time (`VITE_API_BASE`, default is this
-machine's LAN IP on port 4000), so the API must be reachable on the same network.
-Override with `API_BASE=http://<ip>:4000 bash scripts/build-apk.sh admin`.
+Each APK has a **default** API base baked in at build time (`VITE_API_BASE`,
+default: this machine's LAN IP on port 4000), and — new in 1.0.1 — the phone can
+change it at runtime, so one downloadable APK works against *any* reachable API:
+
+- The packaged apps show a **Server** row under the sign-in form with the address
+  in use. Tap it, type the API address and press **Test and save**; the address is
+  probed against `/api/health` first, and only a real SalonPro server is accepted
+  as "connected" — a wrong address, a captive portal or someone else's web server
+  is refused with the reason.
+- A failed sign-in in the packaged app says whether the server *answered with an
+  error* or was *unreachable*, and points at that setting. (The two need different
+  fixes; "failed to fetch" tells nobody anything.)
+- A build made with no address at all (`API_BASE="" bash scripts/build-apk.sh`)
+  opens the Server row immediately on first launch.
+
+Override the default at build time with
+`API_BASE=http://<ip>:4000 bash scripts/build-apk.sh admin`.
+
+**What "sharing the APK" still needs:** the phone must be able to reach the API —
+the same Wi-Fi as this PC, or a publicly hosted address (deploy the API anywhere
+that serves HTTPS and put that URL in the Server row). No APK can invent a server
+to talk to. The APK is also a **debug** build: Android will show "Install unknown
+apps" and Play Protect notices, which is expected for a private, unsigned build.
 
 Run the API in **your own terminal** (`bash scripts/serve.sh`) rather than in an
 agent/session background shell: when such a session restarts, its shells are
-killed and the apps then report **"failed to fetch"** on the first call. The
-fix in that case is simply to start the API again — it prints the exact
-`http://<lan-ip>:4000` address the installed APK expects.
-
-The API base is baked into the bundle, so the app must be rebuilt (and
-reinstalled) if this machine's LAN IP changes.
+killed and the apps then report **"failed to fetch"** on the first call. The fix
+in that case is simply to start the API again — it prints the exact
+`http://<lan-ip>:4000` address the installed APK defaults to.
 
 ### It behaves like an app, not a website
 
@@ -298,10 +315,10 @@ boots the real Express app on an ephemeral port against PGlite — real Postgres
 compiled to WebAssembly — seeded deterministically.
 
 ```bash
-npm test              # everything (208 tests)
+npm test              # everything (226 tests)
 npm run test:shared   # pure helpers: money, time, masking (9)
 npm run test:api      # database, routes, journeys, integrations (119)
-npm run test:web      # mobile UX, pages, crash safety, primitives (80)
+npm run test:web      # mobile UX, pages, crash safety, server setting (98)
 npm run test:smoke    # just the end-to-end journeys (10)
 ```
 
@@ -318,6 +335,7 @@ What the suites cover:
 | **`mobile-ux.test.tsx`** | 21 | The mobile-app contracts: `viewport-fit=cover`, safe-area padding, `.card { min-width: 0 }`, **no `overflow-x: hidden` anywhere**, `overscroll-behavior`/tap-highlight off, `prefers-reduced-motion` (CSS + `MotionConfig`), the dock's items are siblings of one flex row with identical geometry, and the Android back button (back inside the app, double-press to exit, forgotten after 2 s) |
 | **`pages.test.tsx`** | 12 | Renders the real pages against a mocked API **twice with different payloads**, so a hardcoded number or a fabricated chart fails; error and empty states; premium-customer leaderboard order and phone masking |
 | **`crash-safety.test.tsx`** | 6 | The error boundary turns a thrown render error into a readable card with a reload button; `NumberTicker` renders `0` for a missing metric instead of blanking the screen |
+| **`server.test.tsx`** | 18 | Address handling for the packaged apps: bare addresses get a scheme, trailing `/` and `/api` are stripped, every request goes through the configured base (a relative `/api/...` fetch is unreachable inside the shell — that bug silently broke reschedule slots and the marketing-consent toggle), a wrong address is **never** reported as connected (HTML, `{ok:false}`, HTTP 500 and timeouts each get their own message), saving is followed by a reload, and the web sign-in is left uncluttered |
 | **existing web tests** | 41 | API client token/401/error shapes and downloads, every design-system primitive, full-app render smoke and route guards |
 
 ### Test architecture
@@ -444,5 +462,10 @@ salonpro/
   exist).
 - Loyalty/period boundaries use the process clock rather than a per-salon
   timezone library.
+- The Android APKs are **debug** builds signed with the debug keystore — fine for
+  sharing directly, but they cannot be published on the Play Store and Android
+  shows the usual "unknown sources" warnings.
+- The API has no hosted deployment of its own: the apps reach whatever address you
+  point them at (LAN by default, the Server row for anything else).
 
 See `REVIEW.md` for each of these with the recommended fix.

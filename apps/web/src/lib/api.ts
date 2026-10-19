@@ -1,19 +1,104 @@
 import type { ApiErrorShape, SessionUser, Wallet } from '@salonpro/shared';
 
 const TOKEN_KEY = 'salonpro.token';
+const BASE_KEY = 'salonpro.apiBase';
 
 /**
  * Base URL for API calls. Empty in the browser (requests go to `/api` and are
  * proxied by Vite / served by the API). Set `VITE_API_BASE` when the UI is
  * packaged into a native shell (Capacitor APK), where relative requests cannot
  * reach the server, e.g. `VITE_API_BASE=http://192.168.1.34:4000`.
+ *
+ * The build value is only a *default*: the phone can be pointed at another
+ * server at runtime (see `ServerCard`, shown on the native login screen), which
+ * is what makes one APK usable by anyone with any reachable API address.
  */
-const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/+$/, '') ?? '';
+const BUILD_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/+$/, '') ?? '';
 
-/** Absolute URL for an API path, honouring an external API base when set. */
+/** The address the app was built against ('' means same origin, i.e. the web build). */
+export function buildApiBase(): string {
+  return BUILD_BASE;
+}
+
+/**
+ * Normalise what a person types into a base URL:
+ * `192.168.1.34:4000` → `http://192.168.1.34:4000`,
+ * `https://salon.example.com/api/` → `https://salon.example.com`.
+ */
+export function normalizeApiBase(input: string): string {
+  const trimmed = input.trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  return withScheme.replace(/\/api$/i, '');
+}
+
+/** The API address in use right now: the phone's own setting, else the build default. */
+export function getApiBase(): string {
+  try {
+    const stored = localStorage.getItem(BASE_KEY);
+    if (stored !== null) return stored;
+  } catch {
+    /* storage unavailable (private mode) — fall back to the build default */
+  }
+  return BUILD_BASE;
+}
+
+/** Store (or clear, with `''`) the phone's server address. */
+export function setApiBase(base: string | null) {
+  try {
+    const clean = normalizeApiBase(base ?? '');
+    if (!clean || clean === BUILD_BASE) localStorage.removeItem(BASE_KEY);
+    else localStorage.setItem(BASE_KEY, clean);
+  } catch {
+    /* storage unavailable — the session simply keeps the build default */
+  }
+}
+
+/** Absolute URL for an API path, honouring the configured server address. */
 export function apiUrl(path: string): string {
   if (path.startsWith('http')) return path;
-  return `${API_BASE}/api${path}`;
+  return `${getApiBase()}/api${path}`;
+}
+
+export interface ServerCheck {
+  ok: boolean;
+  /** What to show the person: success text or the reason it failed. */
+  message: string;
+}
+
+/**
+ * Ask an address whether it is a SalonPro API, before committing to it.
+ *
+ * This is deliberately honest: a captive portal, a wrong port or someone else's
+ * web server must not be accepted as "connected".
+ */
+export async function checkApiBase(input: string): Promise<ServerCheck> {
+  const base = normalizeApiBase(input);
+  if (!base) return { ok: false, message: 'Enter your salon server address first.' };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(`${base}/api/health`, { signal: controller.signal, headers: { accept: 'application/json' } });
+    if (!res.ok) {
+      return { ok: false, message: `That address answered with HTTP ${res.status}. Check it is the SalonPro server.` };
+    }
+    const body = (await res.json().catch(() => null)) as { ok?: boolean } | null;
+    if (!body || body.ok !== true) {
+      return { ok: false, message: 'That address is not a SalonPro server.' };
+    }
+    return { ok: true, message: 'Connected to your SalonPro server.' };
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === 'AbortError';
+    return {
+      ok: false,
+      message: timedOut
+        ? 'No answer after 8 seconds. Check the address and that the phone can reach the server.'
+        : 'Could not reach that address. Check the address and the network.',
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function getToken(): string | null {

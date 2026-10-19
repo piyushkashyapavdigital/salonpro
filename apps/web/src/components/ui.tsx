@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect } from 'react';
+import { type ReactNode, cloneElement, isValidElement, type ReactElement, useEffect, useId } from 'react';
 import type { AppointmentStatus, NotificationStatus, PaymentOrderStatus, ReferralStatus, RewardStatus } from '@salonpro/shared';
 import { statusLabel } from '@salonpro/shared';
 
@@ -187,10 +187,24 @@ export function Field({
   children: ReactNode;
   className?: string;
 }) {
+  /* Wire the <label> to the control it names: `htmlFor` + an id, so tapping the
+   * label focuses the field and a screen reader announces what it is for. Only
+   * applied when the child is a single element; a wrapper (e.g. the +91 prefix
+   * around the phone input) is left alone and the hint still names the field. */
+  const id = useId();
+  const control =
+    isValidElement(children) && (children.props as { id?: string }).id === undefined
+      ? cloneElement(children as ReactElement<{ id?: string }>, { id })
+      : children;
+
   return (
     <div className={className}>
-      {label ? <label className="label">{label}</label> : null}
-      {children}
+      {label ? (
+        <label className="label" htmlFor={isValidElement(children) ? id : undefined}>
+          {label}
+        </label>
+      ) : null}
+      {control}
       {hint && !error ? <p className="mt-1 text-[12px] text-ink-400">{hint}</p> : null}
       {error ? <p className="mt-1 text-[12px] font-medium text-rose-500">{error}</p> : null}
     </div>

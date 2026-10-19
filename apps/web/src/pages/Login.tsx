@@ -3,9 +3,11 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ROLE_LABEL, type Role } from '@salonpro/shared';
 import { useAuth } from '../lib/auth';
 import { homePath, isAdminApp } from '../lib/mode';
-import { endpoints } from '../lib/api';
+import { ApiError, buildApiBase, endpoints, getApiBase } from '../lib/api';
+import { isNative } from '../lib/native';
 import { Logo } from '../components/layout';
 import { Alert, Avatar, Button, Card, Field, Input } from '../components/ui';
+import { ServerCard } from '../components/ServerCard';
 import { IconArrowLeft, IconLock, IconPhone, IconShield } from '../components/icons';
 import { useToast } from '../components/Toast';
 
@@ -41,6 +43,18 @@ export default function Login() {
     if (user) navigate(homePath(user.role), { replace: true });
   }, [user, navigate]);
 
+  /* The server *answering* with an error and the server being *unreachable* are
+   * different problems, and only the second one the person can fix themselves —
+   * by pointing the app at the right address (the Server card sits right below
+   * the form in the packaged apps). Say which one happened. */
+  const describeError = (err: unknown, fallback: string) => {
+    if (err instanceof ApiError) return err.message;
+    if (isNative()) {
+      return `${fallback} The server at ${getApiBase() || 'the built-in address'} could not be reached — check the Server address below.`;
+    }
+    return `${fallback} Check your connection and try again.`;
+  };
+
   const requestOtp = async () => {
     setError(null);
     if (!/^\d{10}$/.test(phone.replace(/\D/g, ''))) {
@@ -61,7 +75,7 @@ export default function Login() {
           : 'Check your messages for the 6 digit code.',
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not send an OTP.');
+      setError(describeError(err, 'Could not send a one-time code.'));
     } finally {
       setBusy(false);
     }
@@ -83,7 +97,7 @@ export default function Login() {
       toast.success(`Welcome back, ${session.user.name.split(' ')[0]}!`);
       navigate(homePath(session.user.role), { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'That code did not work.');
+      setError(describeError(err, 'Could not verify that code.'));
     } finally {
       setBusy(false);
     }
@@ -259,6 +273,10 @@ export default function Login() {
               </>
             )}
           </Card>
+
+          {/* Native shells: which server this phone talks to. Open by default
+              only when the build ships no address at all. */}
+          {isNative() ? <ServerCard defaultOpen={!getApiBase() && !buildApiBase()} /> : null}
 
           {demo && demo.accounts.length ? (
             <Card className="mt-4 overflow-hidden">
