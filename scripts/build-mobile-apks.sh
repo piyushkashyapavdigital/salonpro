@@ -80,7 +80,7 @@ PY
   mkdir -p "$ROOT/artifacts"
   local slug out
   slug="$(basename "$app_dir")"
-  out="$ROOT/artifacts/${slug}-1.0.1.apk"
+  out="$ROOT/artifacts/${slug}-1.0.2.apk"
   cp "$apk" "$out"
   printf '✅ %s → %s (%s)\n' "$label" "$out" "$(du -h "$out" | cut -f1)"
 }
@@ -90,5 +90,5 @@ if [ "$WANT_ADMIN" = 1 ]; then build_app "$ROOT/apps/mobile-admin" "admin app"; 
 
 echo
 echo "Install on a connected phone:"
-echo "  adb install -r artifacts/mobile-customer-1.0.1.apk"
-echo "  adb install -r artifacts/mobile-admin-1.0.1.apk"
+echo "  adb install -r artifacts/mobile-customer-1.0.2.apk"
+echo "  adb install -r artifacts/mobile-admin-1.0.2.apk"

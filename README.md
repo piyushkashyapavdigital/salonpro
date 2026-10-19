@@ -230,8 +230,8 @@ when `SALONPRO_API_BASE` is set, copies the Material icon font into the APK and
 runs `./gradlew assembleRelease`. Output lands in `artifacts/`:
 
 ```
-artifacts/mobile-customer-1.0.1.apk      (com.salonpro.app)
-artifacts/mobile-admin-1.0.1.apk         (com.salonpro.admin)
+artifacts/mobile-customer-1.0.2.apk      (com.salonpro.app)
+artifacts/mobile-admin-1.0.2.apk         (com.salonpro.admin)
 ```
 
 Prerequisites: **JDK 17**, the Android SDK (`platform-tools`, `platforms;android-36`,
@@ -248,7 +248,7 @@ Install over USB:
 
 ```bash
 bash scripts/install-apks.sh       # restarts adb, waits for authorization, installs both
-adb install -r artifacts/mobile-customer-1.0.1.apk
+adb install -r artifacts/mobile-customer-1.0.2.apk
 ```
 
 ### Which server do the apps talk to?

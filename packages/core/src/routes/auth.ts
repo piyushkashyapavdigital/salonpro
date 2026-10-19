@@ -166,6 +166,66 @@ authRouter.post(
   }),
 );
 
+/**
+ * Development-only PIN sign-in.
+ *
+ * Switched on only on a development/test server, or a production server that
+ * explicitly opted into demo mode (`ALLOW_DEV_OTP`) — so it cannot exist on a
+ * real deployment. It lets whoever is running the demo open the admin app
+ * without juggling one-time codes — the same spirit as the on-screen dev code
+ * for the customer app. Pass a `phone` to sign in as that account, or omit it to
+ * sign in as the salon owner. Every use is written to the audit log with
+ * `method: 'dev_pin'`, so it is never silent.
+ */
+authRouter.post(
+  '/dev-login',
+  handler(async (req, res) => {
+    const body = z
+      .object({ pin: z.string().min(3).max(12), phone: z.string().optional() })
+      .parse(req.body);
+
+    /*
+     * Same gate as the dev OTP mock: a development/test server, or a production
+     * server that explicitly opted in with ALLOW_DEV_OTP. A real deployment
+     * turns this off simply by not setting the flag.
+     */
+    if (env.nodeEnv === 'production' && !env.allowDevOtp) {
+      throw forbidden('Developer sign-in is switched off on this server. Use the one-time code instead.');
+    }
+    await assertUnderRateLimit('devpin', 'dev_login', 20, 15);
+    await recordAttempt('devpin', 'dev_login');
+    if (body.pin !== env.devLoginPin) {
+      throw unauthorized('That developer PIN is not correct.');
+    }
+
+    let user: { id: string; name: string; role: string; status: string } | null = null;
+    if (body.phone) {
+      const phone = normalizePhone(body.phone);
+      if (!phoneSchema.safeParse(phone).success) throw badRequest('Enter a valid 10 digit mobile number.');
+      user = (await one('SELECT id, name, role, status FROM users WHERE phone = ?', phone)) ?? null;
+      if (!user) throw notFound('No account uses that number yet. Add the person with the one-time code first.');
+    } else {
+      user =
+        (await one(
+          "SELECT id, name, role, status FROM users WHERE role IN ('salon_owner','super_admin') ORDER BY CASE role WHEN 'salon_owner' THEN 0 ELSE 1 END, createdAt LIMIT 1",
+        )) ?? null;
+      if (!user) throw notFound('This salon has no owner account yet.');
+    }
+    if (user.status === 'deactivated') throw unauthorized('This account has been deactivated. Contact the salon.');
+
+    const token = await createSession(user.id, req);
+    const sessionUser = (await buildSessionUser(user.id))!;
+    await audit(user.id, 'auth.login', 'user', user.id, { method: 'dev_pin' }, clientIp(req));
+    const salonId = sessionUser.salonId ?? (await one<{ id: string }>('SELECT id FROM salons LIMIT 1'))?.id ?? null;
+    res.json({
+      token,
+      user: sessionUser,
+      wallet: salonId ? await walletView(salonId, user.id) : null,
+      notice: 'DEV MODE — signed in with the developer PIN. No OTP was used and no SMS was sent.',
+    });
+  }),
+);
+
 /** Development-only password login for the seeded demo accounts. */
 authRouter.get(
   '/demo-accounts',

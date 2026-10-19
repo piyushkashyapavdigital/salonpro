@@ -80,6 +80,13 @@ export const auth = {
   demoLogin: (phone: string) =>
     api<SessionResponse>('/auth/demo-login', { method: 'POST', body: { phone }, anonymous: true }),
 
+  /**
+   * Demo servers only: sign in with the developer PIN. Omit `phone` to sign in
+   * as the salon owner. The server refuses this unless ALLOW_DEV_OTP is on.
+   */
+  devLogin: (body: { pin: string; phone?: string }) =>
+    api<SessionResponse>('/auth/dev-login', { method: 'POST', body, anonymous: true }),
+
   invite: (body: { name: string; phone: string; role: string; branchId?: string; email?: string }) =>
     api<{ ok: true; inviteToken?: string; message?: string }>('/auth/invite', { method: 'POST', body }),
 

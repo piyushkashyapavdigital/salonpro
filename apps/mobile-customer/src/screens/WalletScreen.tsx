@@ -14,26 +14,42 @@ import { customer, payments } from '../shared/endpoints';
 import { startCheckout } from '../shared/checkout';
 import { errorMessage, useAsync } from '../shared/hooks';
 import { useAuth } from '../shared/auth';
-import { Badge, Banner, Button, Card, Empty, Loading, SectionTitle, StatTile } from '../shared/components';
+import { Badge, Banner, Button, Card, Empty, Field, Loading, SectionTitle, StatTile } from '../shared/components';
 import { colors, font, gradients, radius, shadow, space } from '../shared/theme';
-import { formatDateTime, formatMoney, formatMoneyShort } from '../core';
+import { formatDateTime, formatMoney, formatMoneyShort, rupeesToPaise } from '../core';
 
 export function WalletScreen() {
   const { refresh } = useAuth();
   const wallet = useAsync(() => customer.wallet(), []);
   const [busyOffer, setBusyOffer] = useState<string | null>(null);
+  const [customAmount, setCustomAmount] = useState('');
   const [message, setMessage] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null);
 
-  const recharge = async (offerId: string, payAmount: number, bonusAmount: number, label: string) => {
-    setBusyOffer(offerId);
+  /**
+   * Top up the wallet.
+   *
+   * The `offerId` is what makes the server add the bonus: both the amount to pay
+   * and the bonus come from the salon's offer on the server, never from the app.
+   * A custom top-up (no offer) adds exactly the amount that was paid.
+   */
+  const recharge = async (params: { key: string; amount: number; bonus: number; label: string; offerId?: string }) => {
+    setBusyOffer(params.key);
     setMessage(null);
     try {
-      const order = await payments.createOrder({ purpose: 'wallet_recharge', amount: payAmount });
+      const order = await payments.createOrder({
+        purpose: 'wallet_recharge',
+        amount: params.amount,
+        ...(params.offerId ? { offerId: params.offerId } : {}),
+      });
       const outcome = await startCheckout(order);
       if (outcome.status === 'paid') {
+        const total = params.amount + params.bonus;
         setMessage({
           tone: 'success',
-          text: `Added ${formatMoney(payAmount + bonusAmount)} (${formatMoney(payAmount)} paid + ${formatMoney(bonusAmount)} bonus) — ${label}. ${outcome.message}`,
+          text:
+            params.bonus > 0
+              ? `Added ${formatMoney(total)} — ${formatMoney(params.amount)} paid + ${formatMoney(params.bonus)} bonus (${params.label}). ${outcome.message}`
+              : `Added ${formatMoney(total)} to your wallet (${params.label}). ${outcome.message}`,
         });
         await wallet.reload();
         await refresh();
@@ -45,6 +61,16 @@ export function WalletScreen() {
     } finally {
       setBusyOffer(null);
     }
+  };
+
+  /** A customer-chosen top-up, with no bonus attached. */
+  const rechargeCustom = () => {
+    const rupees = Number(customAmount.replace(/[^\d.]/g, ''));
+    if (!Number.isFinite(rupees) || rupees < 100) {
+      setMessage({ tone: 'error', text: 'Enter an amount of ₹100 or more.' });
+      return;
+    }
+    void recharge({ key: 'custom', amount: rupeesToPaise(rupees), bonus: 0, label: 'Custom top-up' });
   };
 
   const explain = () => {
@@ -103,25 +129,60 @@ export function WalletScreen() {
               <Empty icon="🎁" title="No recharge offers" message="This salon has not published any top-up offers right now." />
             </Card>
           ) : (
-            <View style={styles.offerRow}>
+            <View style={styles.offerList}>
               {data!.offers.map((offer) => (
                 <View key={offer.id} style={styles.offerCard}>
-                  <Text style={styles.offerLabel}>{offer.label}</Text>
-                  <Text style={styles.offerPay}>Pay {formatMoney(offer.payAmount)}</Text>
-                  <Text style={styles.offerBonus}>+ {formatMoney(offer.bonusAmount)} bonus</Text>
-                  <Text style={styles.offerTotal}>{formatMoney(offer.totalValue)} value</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.offerLabel}>{offer.label}</Text>
+                    <Text style={styles.offerTotal}>Pay {formatMoney(offer.payAmount)}</Text>
+                    <Text style={styles.offerBonus}>
+                      + {formatMoney(offer.bonusAmount)} bonus · worth {formatMoney(offer.totalValue)}
+                    </Text>
+                  </View>
                   <Button
-                    label={busyOffer === offer.id ? 'Opening…' : 'Recharge'}
+                    label={busyOffer === offer.id ? 'Opening…' : `Add ${formatMoney(offer.totalValue)}`}
                     size="sm"
-                    onPress={() => void recharge(offer.id, offer.payAmount, offer.bonusAmount, offer.label)}
+                    onPress={() =>
+                      void recharge({
+                        key: offer.id,
+                        amount: offer.payAmount,
+                        bonus: offer.bonusAmount,
+                        label: offer.label,
+                        offerId: offer.id,
+                      })
+                    }
                     loading={busyOffer === offer.id}
                     disabled={!!busyOffer && busyOffer !== offer.id}
-                    style={{ marginTop: space(3) }}
                   />
                 </View>
               ))}
             </View>
           )}
+
+          <Card>
+            <View style={styles.customHead}>
+              <MaterialIcons name="add-card" size={18} color={colors.brand700} />
+              <Text style={styles.customTitle}>Add your own amount</Text>
+            </View>
+            <Text style={styles.customNote}>
+              Top up any amount from ₹100. The offers above add bonus value; a custom top-up adds exactly what you pay.
+            </Text>
+            <Field
+              label="Amount (₹)"
+              value={customAmount}
+              onChangeText={(text) => setCustomAmount(text.replace(/[^\d]/g, '').slice(0, 7))}
+              keyboardType="number-pad"
+              placeholder="500"
+              hint="Minimum ₹100."
+            />
+            <Button
+              label={busyOffer === 'custom' ? 'Opening…' : 'Add money to wallet'}
+              onPress={rechargeCustom}
+              loading={busyOffer === 'custom'}
+              disabled={!!busyOffer && busyOffer !== 'custom'}
+              style={{ marginTop: space(3) }}
+            />
+          </Card>
 
           {balance ? (
             <Card>
@@ -198,12 +259,22 @@ const styles = StyleSheet.create({
   splitValue: { color: colors.white, fontSize: font.size.md, fontWeight: font.weight.bold, marginTop: 2 },
   infoButton: { marginLeft: 'auto', width: 32, height: 32, borderRadius: radius.pill, backgroundColor: '#ffffff26', alignItems: 'center', justifyContent: 'center' },
   stack: { padding: space(4), gap: space(3) },
-  offerRow: { flexDirection: 'row', gap: space(2) },
-  offerCard: { flex: 1, backgroundColor: colors.white, borderRadius: radius.lg, padding: space(3.5), ...shadow.card },
+  offerList: { gap: space(2) },
+  offerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space(3),
+    backgroundColor: colors.white,
+    borderRadius: radius.lg,
+    padding: space(4),
+    ...shadow.card,
+  },
   offerLabel: { fontSize: font.size.xs, fontWeight: font.weight.bold, color: colors.brand600, textTransform: 'uppercase', letterSpacing: 0.6 },
-  offerPay: { fontSize: font.size.md, fontWeight: font.weight.bold, color: colors.ink900, marginTop: space(1.5) },
+  offerTotal: { fontSize: font.size.md, fontWeight: font.weight.bold, color: colors.ink900, marginTop: space(1) },
   offerBonus: { fontSize: font.size.sm, color: colors.mint, fontWeight: font.weight.semibold, marginTop: 2 },
-  offerTotal: { fontSize: font.size.xs, color: colors.ink400, marginTop: space(1) },
+  customHead: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
+  customTitle: { fontSize: font.size.md, fontWeight: font.weight.bold, color: colors.ink900 },
+  customNote: { fontSize: font.size.xs, color: colors.ink500, marginTop: space(1), marginBottom: space(3), lineHeight: 18 },
   statsRow: { flexDirection: 'row', gap: space(3) },
   txRow: { flexDirection: 'row', alignItems: 'center', gap: space(3), paddingVertical: space(3) },
   txRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.ink100 },

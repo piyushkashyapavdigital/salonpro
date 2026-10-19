@@ -28,6 +28,8 @@ export function SignInScreen() {
   const [showServer, setShowServer] = useState(false);
   const [demo, setDemo] = useState<{ accounts: DemoAccount[]; notice: string } | null>(null);
   const [demoBusy, setDemoBusy] = useState(false);
+  const [pin, setPin] = useState('');
+  const [pinBusy, setPinBusy] = useState(false);
 
   const cleanPhone = phone.replace(/\D/g, '').slice(-10);
 
@@ -91,6 +93,23 @@ export function SignInScreen() {
       setError(errorMessage(err));
     } finally {
       setDemoBusy(false);
+    }
+  };
+
+  /** Demo servers only: open the app with the developer PIN instead of an OTP. */
+  const devLogin = async () => {
+    setError(null);
+    if (pin.replace(/\D/g, '').length < 3) {
+      setError('Enter the developer PIN.');
+      return;
+    }
+    setPinBusy(true);
+    try {
+      await signIn(await auth.devLogin({ pin: pin.trim() }));
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setPinBusy(false);
     }
   };
 
@@ -170,6 +189,33 @@ export function SignInScreen() {
           </Card>
 
           <Card>
+            <View style={styles.devHead}>
+              <MaterialIcons name="vpn-key" size={18} color={colors.brand700} />
+              <Text style={styles.devTitle}>Developer sign-in</Text>
+            </View>
+            <Text style={styles.devNote}>
+              Demo servers only. Enter the developer PIN to open the app as the salon owner — no SMS, no one-time code.
+              A real server turns this off automatically.
+            </Text>
+            <Field
+              label="Developer PIN"
+              value={pin}
+              onChangeText={(text) => setPin(text.replace(/\D/g, '').slice(0, 8))}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={8}
+              placeholder="••••"
+            />
+            <Button
+              label={pinBusy ? 'Opening…' : 'Open with PIN'}
+              variant="secondary"
+              onPress={() => void devLogin()}
+              loading={pinBusy}
+              style={{ marginTop: space(3) }}
+            />
+          </Card>
+
+          <Card>
             <Button
               label={demo ? 'Hide demo staff' : 'Demo staff accounts'}
               variant="secondary"
@@ -236,4 +282,7 @@ const styles = StyleSheet.create({
   serverToggle: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
   serverToggleText: { flex: 1, fontSize: font.size.md, fontWeight: font.weight.semibold, color: colors.ink800 },
   version: { textAlign: 'center', color: colors.ink300, fontSize: font.size.xs },
+  devHead: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
+  devTitle: { fontSize: font.size.md, fontWeight: font.weight.bold, color: colors.ink900 },
+  devNote: { fontSize: font.size.xs, color: colors.ink500, marginTop: space(1), marginBottom: space(3), lineHeight: 18 },
 });

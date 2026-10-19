@@ -74,6 +74,30 @@ test('demo login rejects an incorrect password', async () => {
   assert.equal(res.status, 401);
 });
 
+test('dev PIN sign-in opens the app as the salon owner and says no OTP was used', async () => {
+  const res = await h.post<{ token: string; user: { role: string }; notice: string }>('/auth/dev-login', {
+    pin: '1234',
+  });
+  assert.equal(res.status, 200);
+  assert.ok(res.data.token, 'a session is issued');
+  assert.equal(res.data.user.role, 'salon_owner');
+  assert.match(res.data.notice, /no otp was used/i);
+});
+
+test('dev PIN sign-in rejects the wrong PIN', async () => {
+  const res = await h.post('/auth/dev-login', { pin: '9999' });
+  assert.equal(res.status, 401);
+});
+
+test('dev PIN sign-in can target a specific staff number', async () => {
+  const res = await h.post<{ user: { role: string } }>('/auth/dev-login', {
+    pin: '1234',
+    phone: ACCOUNTS.manager,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.user.role, 'branch_manager');
+});
+
 test('session tokens are stored hashed, never in clear', async () => {
   const token = await h.login(ACCOUNTS.owner);
   // The token is stored as sha256(token + SESSION_SECRET), never in clear.

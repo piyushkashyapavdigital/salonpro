@@ -19,8 +19,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 # The signed release APKs the salon installs (built by scripts/build-mobile-apks.sh).
-RN_CUSTOMER="artifacts/mobile-customer-1.0.1.apk"
-RN_ADMIN="artifacts/mobile-admin-1.0.1.apk"
+RN_CUSTOMER="artifacts/mobile-customer-1.0.2.apk"
+RN_ADMIN="artifacts/mobile-admin-1.0.2.apk"
 
 if ! command -v adb >/dev/null 2>&1; then
   echo "ERROR: adb not found on PATH." >&2

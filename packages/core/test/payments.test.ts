@@ -71,6 +71,26 @@ test('server-side verification accepts a genuinely signed checkout payload', asy
   assert.equal(res.status, 200);
   assert.equal(res.data.credited, true);
   assert.equal(res.data.wallet.cashBalance, 50000);
+  assert.equal(res.data.wallet.bonusBalance, 5000, 'the offer bonus is credited alongside the paid amount');
+});
+
+test('a custom top-up with no offer credits exactly what was paid and no bonus', async () => {
+  const token = await freshCustomer();
+  const order = await h.post<{ checkout: any }>(
+    '/payments/orders',
+    { purpose: 'wallet_recharge', amount: 123400 },
+    token,
+  );
+  assert.equal(order.status, 201);
+  const sim = await h.post(
+    '/payments/simulate',
+    { razorpayOrderId: order.data.checkout.orderId, outcome: 'success' },
+    token,
+  );
+  assert.equal(sim.status, 200);
+  const wallet = await h.get<{ wallet: any }>('/customer/wallet', token);
+  assert.equal(wallet.data.wallet.cashBalance, 123400);
+  assert.equal(wallet.data.wallet.bonusBalance, 0);
 });
 
 test('a tampered signature is rejected and no money moves', async () => {

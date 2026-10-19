@@ -105,6 +105,12 @@ export const env = {
   allowDevOtp: bool('ALLOW_DEV_OTP', false),
 
   /**
+   * PIN for the demo-only developer sign-in (`POST /api/auth/dev-login`). It only
+   * works while `allowDevOtp` is on, so a real deployment can never use it.
+   */
+  devLoginPin: str('DEV_LOGIN_PIN', '1234'),
+
+  /**
    * Postgres pool size. Serverless platforms run many short-lived instances per
    * database, so this stays small there (Neon's pooled endpoint multiplexes);
    * a single long-running process can afford more.
