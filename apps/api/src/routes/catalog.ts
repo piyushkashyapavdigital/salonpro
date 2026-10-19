@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, scopedSalonId } from '../auth';
 import { all, one, parseJson } from '../db';
-import { handler, notFound } from '../lib/http';import { findSlots, staffForBranch } from '../services/availability';
+import { handler, notFound } from '../lib/http';
+import { findSlots, staffForBranch } from '../services/availability';
 import { resolveServices, toCoupon, totalDuration, subtotalOf, validateCoupon } from '../services/booking';
 import { readSettings } from '../services/settings';
 import { getOrderByRazorpayId } from '../services/payments';
@@ -15,9 +16,9 @@ export const catalogRouter = Router();
 catalogRouter.get(
   '/salon',
   requireAuth,
-  handler((req, res) => {
-    const salonId = scopedSalonId(req.auth!);
-    const salon = one<{ id: string; name: string; address: string; contact: string; currency: string; timezone: string; settings: string }>(
+  handler(async (req, res) => {
+    const salonId = await scopedSalonId(req.auth!);
+    const salon = await one<{ id: string; name: string; address: string; contact: string; currency: string; timezone: string; settings: string }>(
       'SELECT * FROM salons WHERE id = ?',
       salonId,
     );
@@ -36,11 +37,13 @@ catalogRouter.get(
 catalogRouter.get(
   '/branches',
   requireAuth,
-  handler((req, res) => {
-    const salonId = scopedSalonId(req.auth!);
-    const branches = all(
-      "SELECT * FROM branches WHERE salonId = ? AND status = 'active' ORDER BY name",
-      salonId,
+  handler(async (req, res) => {
+    const salonId = await scopedSalonId(req.auth!);
+    const branches = (
+      await all(
+        "SELECT * FROM branches WHERE salonId = ? AND status = 'active' ORDER BY name",
+        salonId,
+      )
     ).map((b) => ({ ...b, openingHours: parseJson(b.openingHours, {}) }));
     res.json({ branches });
   }),
@@ -49,10 +52,10 @@ catalogRouter.get(
 catalogRouter.get(
   '/services',
   requireAuth,
-  handler((req, res) => {
-    const salonId = scopedSalonId(req.auth!);
+  handler(async (req, res) => {
+    const salonId = await scopedSalonId(req.auth!);
     const includeInactive = req.query.includeInactive === 'true' && req.auth!.role !== 'customer';
-    const services = all(
+    const services = await all(
       `SELECT * FROM services WHERE salonId = ? ${includeInactive ? '' : 'AND active = 1'} ORDER BY sortOrder, name`,
       salonId,
     );
@@ -64,15 +67,17 @@ catalogRouter.get(
 catalogRouter.get(
   '/staff',
   requireAuth,
-  handler((req, res) => {
+  handler(async (req, res) => {
     const branchId = z.string().min(1).parse(req.query.branchId);
     const includeInactive = req.query.includeInactive === 'true' && req.auth!.role !== 'customer';
-    const rows = staffForBranch(branchId, includeInactive).map((s) => {
-      const staffRow = one<{ workingHours: string; commissionRules: string; salonId: string }>(
+    const staff = await staffForBranch(branchId, includeInactive);
+    const rows = [];
+    for (const s of staff) {
+      const staffRow = (await one<{ workingHours: string; commissionRules: string; salonId: string }>(
         'SELECT workingHours, commissionRules, salonId FROM staff WHERE id = ?',
         s.id,
-      )!;
-      return {
+      ))!;
+      rows.push({
         id: s.id,
         name: s.name,
         designation: s.designation,
@@ -80,8 +85,8 @@ catalogRouter.get(
         status: s.status,
         workingHours: parseJson(staffRow.workingHours, {}),
         commissionRules: parseJson(staffRow.commissionRules, {}),
-      };
-    });
+      });
+    }
     res.json({ staff: rows });
   }),
 );
@@ -90,7 +95,7 @@ catalogRouter.get(
 catalogRouter.get(
   '/availability',
   requireAuth,
-  handler((req, res) => {
+  handler(async (req, res) => {
     const query = z
       .object({
         branchId: z.string().min(1),
@@ -100,16 +105,18 @@ catalogRouter.get(
       })
       .parse(req.query);
 
-    const salonId = scopedSalonId(req.auth!);
+    const salonId = await scopedSalonId(req.auth!);
     const serviceIds = query.serviceIds.split(',').filter(Boolean);
-    const services = resolveServices(salonId, query.branchId, serviceIds);
-    const settings = readSettings(one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId)?.settings);
+    const services = await resolveServices(salonId, query.branchId, serviceIds);
+    const settings = readSettings(
+      (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId))?.settings,
+    );
 
     const today = new Date().toISOString().slice(0, 10);
     const nowMinutes =
       query.date === today ? new Date().getHours() * 60 + new Date().getMinutes() : undefined;
 
-    const result = findSlots({
+    const result = await findSlots({
       branchId: query.branchId,
       date: query.date,
       durationMinutes: totalDuration(services),
@@ -128,10 +135,10 @@ catalogRouter.get(
 catalogRouter.get(
   '/coupons',
   requireAuth,
-  handler((req, res) => {
-    const salonId = scopedSalonId(req.auth!);
+  handler(async (req, res) => {
+    const salonId = await scopedSalonId(req.auth!);
     const now = new Date().toISOString();
-    const rows = all(
+    const rows = await all(
       'SELECT * FROM coupons WHERE salonId = ? AND active = 1 AND endAt >= ? ORDER BY minAmount',
       salonId,
       now,
@@ -143,10 +150,10 @@ catalogRouter.get(
 catalogRouter.post(
   '/coupons/validate',
   requireAuth,
-  handler((req, res) => {
+  handler(async (req, res) => {
     const body = z.object({ code: z.string().min(1), amount: z.number().int().nonnegative() }).parse(req.body);
-    const salonId = scopedSalonId(req.auth!);
-    const { coupon, discount } = validateCoupon(salonId, body.code, body.amount);
+    const salonId = await scopedSalonId(req.auth!);
+    const { coupon, discount } = await validateCoupon(salonId, body.code, body.amount);
     res.json({
       ok: true,
       code: coupon.code,
@@ -161,11 +168,13 @@ catalogRouter.post(
 catalogRouter.get(
   '/recharge-offers',
   requireAuth,
-  handler((req, res) => {
-    const salonId = scopedSalonId(req.auth!);
-    const offers = all(
-      'SELECT * FROM recharge_offers WHERE salonId = ? AND active = 1 ORDER BY sortOrder',
-      salonId,
+  handler(async (req, res) => {
+    const salonId = await scopedSalonId(req.auth!);
+    const offers = (
+      await all(
+        'SELECT * FROM recharge_offers WHERE salonId = ? AND active = 1 ORDER BY sortOrder',
+        salonId,
+      )
     ).map((o) => ({ ...o, totalValue: o.payAmount + o.bonusAmount }));
     res.json({ offers });
   }),
@@ -174,15 +183,15 @@ catalogRouter.get(
 /** Public: resolve a referral link so the app can prefill the code. */
 catalogRouter.get(
   '/join/:code',
-  handler((req, res) => {
+  handler(async (req, res) => {
     const code = String(req.params.code ?? '').toUpperCase();
-    const row = one<{ code: string; customerId: string; salonId: string; status: string }>(
+    const row = await one<{ code: string; customerId: string; salonId: string; status: string }>(
       'SELECT code, customerId, salonId, status FROM referral_codes WHERE code = ?',
       code,
     );
     if (!row || row.status !== 'active') throw notFound('That referral link is no longer valid.');
-    const referrer = one<{ name: string }>('SELECT name FROM users WHERE id = ?', row.customerId);
-    const salon = one<{ name: string }>('SELECT name FROM salons WHERE id = ?', row.salonId);
+    const referrer = await one<{ name: string }>('SELECT name FROM users WHERE id = ?', row.customerId);
+    const salon = await one<{ name: string }>('SELECT name FROM salons WHERE id = ?', row.salonId);
     res.json({
       valid: true,
       code: row.code,
@@ -196,7 +205,7 @@ catalogRouter.get(
 /** Public: a limited view of the customer flow that needs no login. */
 catalogRouter.get(
   '/referral-info',
-  handler((req, res) => {
+  handler(async (req, res) => {
     const token = String(req.query.token ?? '');
     const verified = token ? verifyAttributionToken(token) : null;
     res.json({ valid: Boolean(verified) });
@@ -205,8 +214,8 @@ catalogRouter.get(
 
 catalogRouter.get(
   '/payment-status/:razorpayOrderId',
-  handler((req, res) => {
-    const order = getOrderByRazorpayId(req.params.razorpayOrderId!);
+  handler(async (req, res) => {
+    const order = await getOrderByRazorpayId(req.params.razorpayOrderId!);
     if (!order) throw notFound('Payment order not found.');
     res.json({ status: order.status, amountPaid: order.amountPaid, mode: order.mode });
   }),
@@ -214,7 +223,7 @@ catalogRouter.get(
 
 catalogRouter.get(
   '/cities',
-  handler((_req, res) => {
+  handler(async (_req, res) => {
     res.json({ cities: ['Bengaluru'] });
   }),
 );

@@ -22,17 +22,17 @@ function randomCode(length = 6) {
   return out;
 }
 
-export function ensureReferralCode(salonId: string, customerId: string) {
-  const existing = one<DbRow>('SELECT * FROM referral_codes WHERE customerId = ? AND salonId = ?', customerId, salonId);
+export async function ensureReferralCode(salonId: string, customerId: string) {
+  const existing = await one<DbRow>('SELECT * FROM referral_codes WHERE customerId = ? AND salonId = ?', customerId, salonId);
   if (existing) return existing;
-  const user = one<{ name: string }>('SELECT name FROM users WHERE id = ?', customerId);
+  const user = await one<{ name: string }>('SELECT name FROM users WHERE id = ?', customerId);
   const prefix = (user?.name ?? 'SALON').replace(/[^A-Za-z]/g, '').slice(0, 4).toUpperCase() || 'SALON';
   for (let attempt = 0; attempt < 12; attempt++) {
     const code = `${prefix}${randomCode(4)}`;
-    const clash = one<{ id: string }>('SELECT id FROM referral_codes WHERE code = ?', code);
+    const clash = await one<{ id: string }>('SELECT id FROM referral_codes WHERE code = ?', code);
     if (!clash) {
       const id = crypto.randomUUID();
-      run(
+      await run(
         'INSERT INTO referral_codes (id, salonId, customerId, code, status, createdAt) VALUES (?,?,?,?,?,?)',
         id,
         salonId,
@@ -41,7 +41,7 @@ export function ensureReferralCode(salonId: string, customerId: string) {
         'active',
         new Date().toISOString(),
       );
-      return one<DbRow>('SELECT * FROM referral_codes WHERE id = ?', id)!;
+      return (await one<DbRow>('SELECT * FROM referral_codes WHERE id = ?', id))!;
     }
   }
   throw conflict('Could not allocate a referral code. Please try again.');
@@ -85,22 +85,22 @@ export function verifyAttributionToken(token: string): { code: string; expires: 
  * A referral is only valid for a genuinely new customer of the salon.
  */
 export function resolveAttribution(customerId: string, salonId: string, token: string | null) {
-  if (!token) return null;
+  if (!token) return Promise.resolve(null);
   const verified = verifyAttributionToken(token);
-  if (!verified) return null;
+  if (!verified) return Promise.resolve(null);
 
-  return tx(() => {
-    const codeRow = one<DbRow>('SELECT * FROM referral_codes WHERE code = ?', verified.code);
+  return tx(async () => {
+    const codeRow = await one<DbRow>('SELECT * FROM referral_codes WHERE code = ?', verified.code);
     if (!codeRow || codeRow.status !== 'active') return null;
     const referrerId = codeRow.customerId as string;
     if (referrerId === customerId) return null; // no self-referral
 
-    const alreadyReferred = one<DbRow>('SELECT * FROM referrals WHERE referredCustomerId = ?', customerId);
+    const alreadyReferred = await one<DbRow>('SELECT * FROM referrals WHERE referredCustomerId = ?', customerId);
     if (alreadyReferred) return alreadyReferred;
 
     // Abuse check: the referred customer must be new to the salon — no completed
     // visit before attribution.
-    const priorVisits = scalar<number>(
+    const priorVisits = await scalar<number>(
       'SELECT COUNT(*) FROM service_records WHERE customerId = ? AND salonId = ?',
       customerId,
       salonId,
@@ -108,11 +108,11 @@ export function resolveAttribution(customerId: string, salonId: string, token: s
     if (priorVisits > 0) return null;
 
     const settings = readSettings(
-      one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId)?.settings,
+      (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId))?.settings,
     );
 
     const id = crypto.randomUUID();
-    run(
+    await run(
       `INSERT INTO referrals
         (id, salonId, referrerId, referredCustomerId, referralCode, status,
          referrerRewardStatus, refereeRewardStatus, referrerRewardAmount, refereeRewardAmount, attributionToken, createdAt)
@@ -130,8 +130,8 @@ export function resolveAttribution(customerId: string, salonId: string, token: s
       token,
       new Date().toISOString(),
     );
-    run('UPDATE customer_profiles SET referredByCode = ?, referralToken = ? WHERE customerId = ?', verified.code, token, customerId);
-    return one<DbRow>('SELECT * FROM referrals WHERE id = ?', id)!;
+    await run('UPDATE customer_profiles SET referredByCode = ?, referralToken = ? WHERE customerId = ?', verified.code, token, customerId);
+    return (await one<DbRow>('SELECT * FROM referrals WHERE id = ?', id))!;
   });
 }
 
@@ -139,7 +139,7 @@ export function resolveAttribution(customerId: string, salonId: string, token: s
 /* Qualification                                                       */
 /* ------------------------------------------------------------------ */
 
-function monthlyRewardCount(customerId: string): number {
+function monthlyRewardCount(customerId: string): Promise<number> {
   const since = new Date();
   since.setDate(1);
   since.setHours(0, 0, 0, 0);
@@ -151,24 +151,24 @@ function monthlyRewardCount(customerId: string): number {
   );
 }
 
-function creditReward(args: {
+async function creditReward(args: {
   customerId: string;
   salonId: string;
   referralId: string;
   amount: number;
   type: 'referrer' | 'referee';
-}): { status: RewardStatus; walletTransactionId: string | null } {
+}): Promise<{ status: RewardStatus; walletTransactionId: string | null }> {
   const idempotencyKey = `referral_${args.referralId}_${args.type}`;
-  const existing = one<DbRow>('SELECT * FROM reward_transactions WHERE idempotencyKey = ?', idempotencyKey);
+  const existing = await one<DbRow>('SELECT * FROM reward_transactions WHERE idempotencyKey = ?', idempotencyKey);
   if (existing) {
     return { status: existing.status as RewardStatus, walletTransactionId: existing.walletTransactionId };
   }
 
   const settings = readSettings(
-    one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', args.salonId)?.settings,
+    (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', args.salonId))?.settings,
   );
-  if (monthlyRewardCount(args.customerId) >= settings.referral.maxRewardsPerMonth) {
-    run(
+  if ((await monthlyRewardCount(args.customerId)) >= settings.referral.maxRewardsPerMonth) {
+    await run(
       'INSERT INTO reward_transactions (id, customerId, referralId, amount, type, status, idempotencyKey, createdAt) VALUES (?,?,?,?,?,?,?,?)',
       crypto.randomUUID(),
       args.customerId,
@@ -182,21 +182,21 @@ function creditReward(args: {
     return { status: 'rejected', walletTransactionId: null };
   }
 
-  const walletRow = one<DbRow>('SELECT * FROM wallets WHERE salonId = ? AND customerId = ?', args.salonId, args.customerId);
-  const walletId = walletRow?.id ?? (() => {
-    const id = crypto.randomUUID();
-    run(
+  const walletRow = await one<DbRow>('SELECT * FROM wallets WHERE salonId = ? AND customerId = ?', args.salonId, args.customerId);
+  let walletId = walletRow?.id;
+  if (!walletId) {
+    walletId = crypto.randomUUID();
+    await run(
       'INSERT INTO wallets (id, salonId, customerId, status, createdAt) VALUES (?,?,?,?,?)',
-      id,
+      walletId,
       args.salonId,
       args.customerId,
       'active',
       new Date().toISOString(),
     );
-    return id;
-  })();
+  }
 
-  const entry = creditBonus({
+  const entry = await creditBonus({
     walletId,
     customerId: args.customerId,
     salonId: args.salonId,
@@ -207,7 +207,7 @@ function creditReward(args: {
     reason: args.type === 'referrer' ? 'Referral reward — you referred a friend' : 'Referral reward — welcome bonus',
   });
 
-  run(
+  await run(
     'INSERT INTO reward_transactions (id, customerId, referralId, amount, type, status, walletTransactionId, idempotencyKey, createdAt) VALUES (?,?,?,?,?,?,?,?,?)',
     crypto.randomUUID(),
     args.customerId,
@@ -228,12 +228,12 @@ function creditReward(args: {
  * referred customer's **first completed and paid** visit.
  */
 export function qualifyForAppointment(appointmentId: string) {
-  return tx(() => {
-    const appt = one<DbRow>('SELECT * FROM appointments WHERE id = ?', appointmentId);
+  return tx(async () => {
+    const appt = await one<DbRow>('SELECT * FROM appointments WHERE id = ?', appointmentId);
     if (!appt) return null;
     if (appt.status !== 'completed' || appt.paymentStatus !== 'paid' || appt.totalAmount <= 0) return null;
 
-    const referral = one<DbRow>(
+    const referral = await one<DbRow>(
       `SELECT * FROM referrals
         WHERE salonId = ? AND (referredCustomerId = ? OR referredCustomerId IS NULL)
         ORDER BY createdAt DESC LIMIT 1`,
@@ -242,17 +242,17 @@ export function qualifyForAppointment(appointmentId: string) {
     );
     if (!referral) return null;
     if (!referral.referredCustomerId) {
-      run('UPDATE referrals SET referredCustomerId = ?, status = ? WHERE id = ?', appt.customerId, 'registered', referral.id);
+      await run('UPDATE referrals SET referredCustomerId = ?, status = ? WHERE id = ?', appt.customerId, 'registered', referral.id);
       referral.referredCustomerId = appt.customerId;
     }
     if (referral.status === 'rewarded' || referral.status === 'reversed') return referral;
     if (referral.referrerId === appt.customerId) return null; // self-referral guard
 
     const settings = readSettings(
-      one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', appt.salonId)?.settings,
+      (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', appt.salonId))?.settings,
     );
     if (settings.referral.requireFirstPaidVisit) {
-      const completedCount = scalar<number>(
+      const completedCount = await scalar<number>(
         'SELECT COUNT(*) FROM service_records WHERE customerId = ? AND salonId = ?',
         appt.customerId,
         appt.salonId,
@@ -264,14 +264,14 @@ export function qualifyForAppointment(appointmentId: string) {
     }
 
     const now = new Date().toISOString();
-    const referrerCredit = creditReward({
+    const referrerCredit = await creditReward({
       customerId: referral.referrerId,
       salonId: appt.salonId,
       referralId: referral.id,
       amount: referral.referrerRewardAmount || settings.referral.referrerReward,
       type: 'referrer',
     });
-    const refereeCredit = creditReward({
+    const refereeCredit = await creditReward({
       customerId: appt.customerId,
       salonId: appt.salonId,
       referralId: referral.id,
@@ -284,7 +284,7 @@ export function qualifyForAppointment(appointmentId: string) {
         ? 'rewarded'
         : 'qualified';
 
-    run(
+    await run(
       `UPDATE referrals
           SET status = ?, qualifyingAppointmentId = ?, qualifiedAt = ?,
               referrerRewardStatus = ?, refereeRewardStatus = ?
@@ -302,7 +302,7 @@ export function qualifyForAppointment(appointmentId: string) {
       [appt.customerId, refereeCredit, 'referee'],
     ] as const) {
       if (credit.status === 'credited') {
-        notifyCustomer({
+        await notifyCustomer({
           salonId: appt.salonId,
           customerId: customerId as string,
           template: 'referral_reward',
@@ -315,32 +315,32 @@ export function qualifyForAppointment(appointmentId: string) {
       }
     }
 
-    audit(referral.referrerId, 'referral.rewarded', 'referral', referral.id, {
+    await audit(referral.referrerId, 'referral.rewarded', 'referral', referral.id, {
       appointmentId,
       referrer: referrerCredit.status,
       referee: refereeCredit.status,
     });
 
-    return one<DbRow>('SELECT * FROM referrals WHERE id = ?', referral.id);
+    return await one<DbRow>('SELECT * FROM referrals WHERE id = ?', referral.id);
   });
 }
 
 /** Undo rewards with audited compensating entries if the qualifying visit is refunded. */
 export function reverseRewards(referralId: string, reason: string, actorId: string) {
-  return tx(() => {
-    const rewards = all<DbRow>(
+  return tx(async () => {
+    const rewards = await all<DbRow>(
       "SELECT * FROM reward_transactions WHERE referralId = ? AND type <> 'reversal' AND status = 'credited'",
       referralId,
     );
     let index = 0;
     for (const reward of rewards) {
       const entry = reward.walletTransactionId
-        ? one<DbRow>('SELECT * FROM wallet_transactions WHERE id = ?', reward.walletTransactionId)
+        ? await one<DbRow>('SELECT * FROM wallet_transactions WHERE id = ?', reward.walletTransactionId)
         : null;
       if (entry) {
-        const walletRow = one<DbRow>('SELECT * FROM wallets WHERE id = ?', entry.walletId);
+        const walletRow = await one<DbRow>('SELECT * FROM wallets WHERE id = ?', entry.walletId);
         if (walletRow) {
-          creditBonus({
+          await creditBonus({
             walletId: entry.walletId,
             customerId: reward.customerId,
             salonId: walletRow.salonId,
@@ -352,30 +352,30 @@ export function reverseRewards(referralId: string, reason: string, actorId: stri
           });
         }
       }
-      run("UPDATE reward_transactions SET status = 'reversed' WHERE id = ?", reward.id);
+      await run("UPDATE reward_transactions SET status = 'reversed' WHERE id = ?", reward.id);
     }
-    run("UPDATE referrals SET status = 'reversed', referrerRewardStatus = 'reversed', refereeRewardStatus = 'reversed' WHERE id = ?", referralId);
-    audit(actorId, 'referral.reversed', 'referral', referralId, { reason });
+    await run("UPDATE referrals SET status = 'reversed', referrerRewardStatus = 'reversed', refereeRewardStatus = 'reversed' WHERE id = ?", referralId);
+    await audit(actorId, 'referral.reversed', 'referral', referralId, { reason });
   });
 }
 
-export function reverseIfQualifyingCancelled(appointmentId: string) {
-  const referral = one<DbRow>(
+export async function reverseIfQualifyingCancelled(appointmentId: string) {
+  const referral = await one<DbRow>(
     "SELECT * FROM referrals WHERE qualifyingAppointmentId = ? AND status IN ('rewarded','qualified')",
     appointmentId,
   );
   if (!referral) return;
-  reverseRewards(referral.id, 'Qualifying appointment was cancelled or refunded', referral.referrerId);
+  await reverseRewards(referral.id, 'Qualifying appointment was cancelled or refunded', referral.referrerId);
 }
 
 /* ------------------------------------------------------------------ */
 /* Reads                                                               */
 /* ------------------------------------------------------------------ */
 
-export function toReferral(row: DbRow): Referral {
-  const referrer = one<{ name: string }>('SELECT name FROM users WHERE id = ?', row.referrerId);
+export async function toReferral(row: DbRow): Promise<Referral> {
+  const referrer = await one<{ name: string }>('SELECT name FROM users WHERE id = ?', row.referrerId);
   const referred = row.referredCustomerId
-    ? one<{ name: string }>('SELECT name FROM users WHERE id = ?', row.referredCustomerId)
+    ? await one<{ name: string }>('SELECT name FROM users WHERE id = ?', row.referredCustomerId)
     : null;
   return {
     id: row.id,
@@ -394,29 +394,32 @@ export function toReferral(row: DbRow): Referral {
   };
 }
 
-export function dashboard(customerId: string, salonId: string): ReferralDashboard {
-  const codeRow = ensureReferralCode(salonId, customerId);
-  const rows = all<DbRow>('SELECT * FROM referrals WHERE referrerId = ? ORDER BY createdAt DESC', customerId);
-  const referrals = rows.map(toReferral);
-  const earned = scalar<number>(
+export async function dashboard(customerId: string, salonId: string): Promise<ReferralDashboard> {
+  const codeRow = await ensureReferralCode(salonId, customerId);
+  const rows = await all<DbRow>('SELECT * FROM referrals WHERE referrerId = ? ORDER BY createdAt DESC', customerId);
+  const referrals: Referral[] = [];
+  for (const row of rows) referrals.push(await toReferral(row));
+  const earned = await scalar<number>(
     `SELECT COALESCE(SUM(amount),0) FROM reward_transactions WHERE customerId = ? AND status = 'credited' AND type <> 'reversal'`,
     customerId,
   );
-  const pending = scalar<number>(
+  const pending = await scalar<number>(
     `SELECT COALESCE(SUM(amount),0) FROM reward_transactions WHERE customerId = ? AND status = 'pending'`,
     customerId,
   );
 
-  const leaderboard = all<DbRow>(
-    `SELECT r.referrerId AS customerId, u.name AS name,
-            SUM(CASE WHEN r.status = 'rewarded' THEN 1 ELSE 0 END) AS qualified,
-            COALESCE((SELECT SUM(rt.amount) FROM reward_transactions rt
-                       WHERE rt.customerId = r.referrerId AND rt.status = 'credited' AND rt.type = 'referrer'), 0) AS earned
-       FROM referrals r JOIN users u ON u.id = r.referrerId
-      WHERE r.salonId = ?
-      GROUP BY r.referrerId
-      ORDER BY qualified DESC, earned DESC LIMIT 10`,
-    salonId,
+  const leaderboard = (
+    await all<DbRow>(
+      `SELECT r.referrerId AS customerId, u.name AS name,
+              SUM(CASE WHEN r.status = 'rewarded' THEN 1 ELSE 0 END) AS qualified,
+              COALESCE((SELECT SUM(rt.amount) FROM reward_transactions rt
+                         WHERE rt.customerId = r.referrerId AND rt.status = 'credited' AND rt.type = 'referrer'), 0) AS earned
+         FROM referrals r JOIN users u ON u.id = r.referrerId
+        WHERE r.salonId = ?
+        GROUP BY r.referrerId, u.name
+        ORDER BY qualified DESC, earned DESC LIMIT 10`,
+      salonId,
+    )
   ).map((r) => ({ customerId: r.customerId, name: r.name, qualified: r.qualified, earned: r.earned }));
 
   return {
@@ -434,28 +437,31 @@ export function dashboard(customerId: string, salonId: string): ReferralDashboar
 }
 
 /** Salon-wide referral analytics for the owner dashboard. */
-export function salonReferralStats(salonId: string) {
+export async function salonReferralStats(salonId: string) {
   const totals = {
-    total: scalar<number>('SELECT COUNT(*) FROM referrals WHERE salonId = ?', salonId),
-    registered: scalar<number>("SELECT COUNT(*) FROM referrals WHERE salonId = ? AND status <> 'pending_attribution'", salonId),
-    qualified: scalar<number>("SELECT COUNT(*) FROM referrals WHERE salonId = ? AND status IN ('qualified','rewarded')", salonId),
-    rewarded: scalar<number>("SELECT COUNT(*) FROM referrals WHERE salonId = ? AND status = 'rewarded'", salonId),
-    reversed: scalar<number>("SELECT COUNT(*) FROM referrals WHERE salonId = ? AND status = 'reversed'", salonId),
-    rewardExpense: scalar<number>(
+    total: await scalar<number>('SELECT COUNT(*) FROM referrals WHERE salonId = ?', salonId),
+    registered: await scalar<number>("SELECT COUNT(*) FROM referrals WHERE salonId = ? AND status <> 'pending_attribution'", salonId),
+    qualified: await scalar<number>("SELECT COUNT(*) FROM referrals WHERE salonId = ? AND status IN ('qualified','rewarded')", salonId),
+    rewarded: await scalar<number>("SELECT COUNT(*) FROM referrals WHERE salonId = ? AND status = 'rewarded'", salonId),
+    reversed: await scalar<number>("SELECT COUNT(*) FROM referrals WHERE salonId = ? AND status = 'reversed'", salonId),
+    rewardExpense: await scalar<number>(
       `SELECT COALESCE(SUM(amount),0) FROM reward_transactions rt
         JOIN referrals r ON r.id = rt.referralId
        WHERE r.salonId = ? AND rt.status = 'credited' AND rt.type <> 'reversal'`,
       salonId,
     ),
   };
-  const topReferrers = all<DbRow>(
+  const topReferrers = await all<DbRow>(
     `SELECT r.referrerId AS customerId, u.name,
             SUM(CASE WHEN r.status IN ('qualified','rewarded') THEN 1 ELSE 0 END) AS qualified,
             COUNT(*) AS invited
        FROM referrals r JOIN users u ON u.id = r.referrerId
-      WHERE r.salonId = ? GROUP BY r.referrerId ORDER BY qualified DESC, invited DESC LIMIT 10`,
+      WHERE r.salonId = ? GROUP BY r.referrerId, u.name ORDER BY qualified DESC, invited DESC LIMIT 10`,
     salonId,
   );
-  const recent = all<DbRow>('SELECT * FROM referrals WHERE salonId = ? ORDER BY createdAt DESC LIMIT 50', salonId).map(toReferral);
+  const recent: Referral[] = [];
+  for (const row of await all<DbRow>('SELECT * FROM referrals WHERE salonId = ? ORDER BY createdAt DESC LIMIT 50', salonId)) {
+    recent.push(await toReferral(row));
+  }
   return { ...totals, topReferrers, recent };
 }

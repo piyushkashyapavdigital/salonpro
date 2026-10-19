@@ -18,8 +18,8 @@ import { readSettings, renderTemplate } from './settings';
 /* Preferences                                                         */
 /* ------------------------------------------------------------------ */
 
-export function preferences(customerId: string): NotificationPreferences {
-  const row = one<DbRow>('SELECT * FROM notification_preferences WHERE customerId = ?', customerId);
+export async function preferences(customerId: string): Promise<NotificationPreferences> {
+  const row = await one<DbRow>('SELECT * FROM notification_preferences WHERE customerId = ?', customerId);
   if (row) {
     return {
       customerId,
@@ -40,10 +40,10 @@ export function preferences(customerId: string): NotificationPreferences {
   };
 }
 
-export function savePreferences(customerId: string, patch: Partial<NotificationPreferences>) {
-  const current = preferences(customerId);
+export async function savePreferences(customerId: string, patch: Partial<NotificationPreferences>) {
+  const current = await preferences(customerId);
   const next = { ...current, ...patch, customerId };
-  run(
+  await run(
     `INSERT INTO notification_preferences (customerId, whatsappConsent, pushEnabled, promotionalConsent, quietHoursStart, quietHoursEnd, updatedAt)
      VALUES (?,?,?,?,?,?,?)
      ON CONFLICT(customerId) DO UPDATE SET
@@ -145,15 +145,15 @@ export interface NotifyArgs {
  * Create (or reuse) a notification. The unique `reminderKey` guarantees the
  * same customer + visit + stage can never queue twice.
  */
-export function notifyCustomer(args: NotifyArgs): NotificationRecord {
-  const existing = one<DbRow>('SELECT * FROM notifications WHERE reminderKey = ?', args.reminderKey);
+export async function notifyCustomer(args: NotifyArgs): Promise<NotificationRecord> {
+  const existing = await one<DbRow>('SELECT * FROM notifications WHERE reminderKey = ?', args.reminderKey);
   if (existing) return toRecord(existing);
 
   const settings = readSettings(
-    one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', args.salonId)?.settings,
+    (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', args.salonId))?.settings,
   );
-  const salon = one<{ name: string }>('SELECT name FROM salons WHERE id = ?', args.salonId);
-  const customer = one<{ name: string; phone: string }>('SELECT name, phone FROM users WHERE id = ?', args.customerId);
+  const salon = await one<{ name: string }>('SELECT name FROM salons WHERE id = ?', args.salonId);
+  const customer = await one<{ name: string; phone: string }>('SELECT name, phone FROM users WHERE id = ?', args.customerId);
   if (!customer) throw new Error('notifyCustomer: unknown customer');
 
   const template = settings.templates[args.template] ?? '';
@@ -169,7 +169,7 @@ export function notifyCustomer(args: NotifyArgs): NotificationRecord {
     ...(args.vars ?? {}),
   });
 
-  const pref = preferences(args.customerId);
+  const pref = await preferences(args.customerId);
   const stage = args.stage;
   const requestedChannels = stage === 'transactional' ? (['whatsapp'] as NotificationChannel[]) : settings.reminderChannels;
   const channel = requestedChannels.find((c) => channelAllowed(c, pref, stage)) ?? requestedChannels[0] ?? 'whatsapp';
@@ -186,7 +186,7 @@ export function notifyCustomer(args: NotifyArgs): NotificationRecord {
   }
 
   const id = crypto.randomUUID();
-  run(
+  await run(
     `INSERT INTO notifications (id, salonId, customerId, channel, template, stage, scheduledAt, status, errorDetails, body, reminderKey, appointmentId, attempts, createdAt)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     id,
@@ -208,38 +208,35 @@ export function notifyCustomer(args: NotifyArgs): NotificationRecord {
   if (args.sendNow && status === 'queued') {
     return attemptSend(id);
   }
-  return toRecord(one<DbRow>('SELECT * FROM notifications WHERE id = ?', id)!);
+  return toRecord((await one<DbRow>('SELECT * FROM notifications WHERE id = ?', id))!);
 }
 
 /** Attempt delivery. Never marks `sent` unless the provider accepted it. */
 export async function attemptSendAsync(id: string) {
-  const row = one<DbRow>('SELECT * FROM notifications WHERE id = ?', id);
+  const row = await one<DbRow>('SELECT * FROM notifications WHERE id = ?', id);
   if (!row) return null;
   if (row.status === 'sent' || row.status === 'delivered') return toRecord(row);
-  const customer = one<{ phone: string }>('SELECT phone FROM users WHERE id = ?', row.customerId);
+  const customer = await one<{ phone: string }>('SELECT phone FROM users WHERE id = ?', row.customerId);
   if (!customer) return null;
   const result = await deliver(row.channel as NotificationChannel, customer.phone, row.body ?? '');
-  run(
+  await run(
     'UPDATE notifications SET attempts = attempts + 1, status = ?, sentAt = ?, errorDetails = ? WHERE id = ?',
     result.ok ? 'sent' : 'pending',
     result.ok ? new Date().toISOString() : null,
     result.ok ? null : result.error ?? 'delivery_failed',
     row.id,
   );
-  return toRecord(one<DbRow>('SELECT * FROM notifications WHERE id = ?', id)!);
+  return toRecord((await one<DbRow>('SELECT * FROM notifications WHERE id = ?', id))!);
 }
 
-/** Synchronous convenience wrapper used by cron jobs. */
-function attemptSend(id: string): NotificationRecord {
-  const row = one<DbRow>('SELECT * FROM notifications WHERE id = ?', id)!;
-  if (row.status === 'sent' || row.status === 'delivered') return toRecord(row);
-  // Fire and forget; the cron run reports on the row asynchronously.
-  void attemptSendAsync(id);
-  return toRecord(row);
+/** Convenience wrapper used by cron jobs: records the send attempt. */
+async function attemptSend(id: string): Promise<NotificationRecord> {
+  await attemptSendAsync(id);
+  return toRecord((await one<DbRow>('SELECT * FROM notifications WHERE id = ?', id))!);
 }
 
-export function toRecord(row: DbRow): NotificationRecord {
-  const customer = one<{ name: string }>('SELECT name FROM users WHERE id = ?', row.customerId);
+export async function toRecord(row: DbRow): Promise<NotificationRecord> {
+  const customer = await one<{ name: string }>('SELECT name FROM users WHERE id = ?', row.customerId);
   return {
     id: row.id,
     salonId: row.salonId,
@@ -260,7 +257,7 @@ export function toRecord(row: DbRow): NotificationRecord {
   };
 }
 
-export function listNotifications(salonId: string, opts: { status?: string; stage?: string; limit?: number } = {}) {
+export async function listNotifications(salonId: string, opts: { status?: string; stage?: string; limit?: number } = {}) {
   const clauses = ['salonId = ?'];
   const params: (string | number)[] = [salonId];
   if (opts.status) {
@@ -272,22 +269,25 @@ export function listNotifications(salonId: string, opts: { status?: string; stag
     params.push(opts.stage);
   }
   params.push(opts.limit ?? 200);
-  return all<DbRow>(
+  const rows = await all<DbRow>(
     `SELECT * FROM notifications WHERE ${clauses.join(' AND ')} ORDER BY createdAt DESC LIMIT ?`,
     ...params,
-  ).map(toRecord);
+  );
+  const out: NotificationRecord[] = [];
+  for (const row of rows) out.push(await toRecord(row));
+  return out;
 }
 
-export function notificationStats(salonId: string) {
-  const byStatus = all<DbRow>(
+export async function notificationStats(salonId: string) {
+  const byStatus = await all<DbRow>(
     'SELECT status, COUNT(*) AS n FROM notifications WHERE salonId = ? GROUP BY status',
     salonId,
   );
-  const byStage = all<DbRow>(
+  const byStage = await all<DbRow>(
     "SELECT stage, COUNT(*) AS n FROM notifications WHERE salonId = ? AND stage <> 'transactional' GROUP BY stage",
     salonId,
   );
-  const conversions = all<DbRow>(
+  const conversions = await all<DbRow>(
     `SELECT n.stage,
             COUNT(*) AS sent,
             SUM(CASE WHEN EXISTS (
@@ -327,17 +327,17 @@ const STAGE_DAYS: Record<Exclude<ReminderStage, 'appointment'>, number> = {
  * who has no upcoming appointment, queue the matching reminder. Duplicate sends
  * are impossible because the reminder key embeds customer + visit + stage.
  */
-export function runReminderPass(salonId: string, now = new Date()): ReminderRunResult {
+export async function runReminderPass(salonId: string, now = new Date()): Promise<ReminderRunResult> {
   const settings = readSettings(
-    one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId)?.settings,
+    (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId))?.settings,
   );
   const result: ReminderRunResult = { scanned: 0, queued: 0, suppressed: 0, skipped: 0, pending: 0 };
   const today = isoDate(now);
 
-  const rows = all<DbRow>(
+  const rows = await all<DbRow>(
     `SELECT sr.customerId, sr.id AS recordId, sr.completedAt,
-            date(sr.completedAt) AS visitDate,
-            CAST(julianday(?) - julianday(date(sr.completedAt)) AS INTEGER) AS daysSince
+            substring(sr."completedAt" from 1 for 10) AS visitDate,
+            (CAST(? AS date) - CAST(substring(sr."completedAt" from 1 for 10) AS date)) AS daysSince
        FROM service_records sr
       WHERE sr.salonId = ?
         AND sr.completedAt = (
@@ -352,7 +352,7 @@ export function runReminderPass(salonId: string, now = new Date()): ReminderRunR
     result.scanned++;
     const daysSince = row.daysSince as number;
 
-    const upcoming = scalar<number>(
+    const upcoming = await scalar<number>(
       `SELECT COUNT(*) FROM appointments
         WHERE customerId = ? AND date >= ? AND status IN ('booked','confirmed','checked_in','in_progress')`,
       row.customerId,
@@ -374,14 +374,13 @@ export function runReminderPass(salonId: string, now = new Date()): ReminderRunR
     }
 
     const reminderKey = `${row.customerId}:${row.recordId}:${stage}`;
-    const existing = one<DbRow>('SELECT * FROM notifications WHERE reminderKey = ?', reminderKey);
+    const existing = await one<DbRow>('SELECT * FROM notifications WHERE reminderKey = ?', reminderKey);
     if (existing) {
       result.skipped++;
       continue;
     }
 
-    const pref = preferences(row.customerId);
-    const record = notifyCustomer({
+    const record = await notifyCustomer({
       salonId,
       customerId: row.customerId,
       template: stage,
@@ -394,21 +393,21 @@ export function runReminderPass(salonId: string, now = new Date()): ReminderRunR
     else result.queued++;
   }
 
-  run('UPDATE app_meta SET lastReminderRunAt = ? WHERE id = 1', now.toISOString());
+  await run('UPDATE app_meta SET lastReminderRunAt = ? WHERE id = 1', now.toISOString());
   return result;
 }
 
 /** Appointment reminder (24h ahead) — transactional, unaffected by promo opt-out. */
-export function scheduleAppointmentReminders(salonId: string, now = new Date()) {
+export async function scheduleAppointmentReminders(salonId: string, now = new Date()) {
   const tomorrow = isoDate(new Date(now.getTime() + 86400000));
-  const appts = all<DbRow>(
+  const appts = await all<DbRow>(
     "SELECT * FROM appointments WHERE salonId = ? AND date = ? AND status IN ('booked','confirmed')",
     salonId,
     tomorrow,
   );
   let queued = 0;
   for (const appt of appts) {
-    const record = notifyCustomer({
+    const record = await notifyCustomer({
       salonId,
       customerId: appt.customerId,
       template: 'appointment_confirmation',
@@ -436,10 +435,10 @@ export interface ReminderSettings {
   enabled: boolean;
 }
 
-export function reminderSettings(salonId: string): ReminderSettings {
-  const row = one<DbRow>('SELECT * FROM reminder_settings WHERE salonId = ?', salonId);
+export async function reminderSettings(salonId: string): Promise<ReminderSettings> {
+  const row = await one<DbRow>('SELECT * FROM reminder_settings WHERE salonId = ?', salonId);
   const settings: SalonSettings = readSettings(
-    one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId)?.settings,
+    (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId))?.settings,
   );
   if (!row) {
     return { stages: settings.reminderStages, channels: settings.reminderChannels, intervals: { ...STAGE_DAYS }, enabled: true };
@@ -452,10 +451,10 @@ export function reminderSettings(salonId: string): ReminderSettings {
   };
 }
 
-export function saveReminderSettings(salonId: string, patch: Partial<ReminderSettings>) {
-  const current = reminderSettings(salonId);
+export async function saveReminderSettings(salonId: string, patch: Partial<ReminderSettings>) {
+  const current = await reminderSettings(salonId);
   const next = { ...current, ...patch };
-  run(
+  await run(
     `INSERT INTO reminder_settings (salonId, stagesJson, channelsJson, templatesJson, intervalsJson, enabled)
      VALUES (?,?,?,?,?,?)
      ON CONFLICT(salonId) DO UPDATE SET stagesJson = excluded.stagesJson, channelsJson = excluded.channelsJson,

@@ -26,7 +26,7 @@ import {
 import { creditBonus, creditCash, getOrCreateWallet, walletView } from '../services/wallet';
 import { readSettings } from '../services/settings';
 import { notifyCustomer } from '../services/notifications';
-import { formatMoney } from '@salonpro/shared';
+import { formatMoney, type Wallet } from '@salonpro/shared';
 
 export const paymentsRouter = Router();
 
@@ -48,7 +48,7 @@ paymentsRouter.post(
       })
       .parse(req.body);
 
-    const salonId = scopedSalonId(req.auth!);
+    const salonId = await scopedSalonId(req.auth!);
     const customerId = req.auth!.id;
 
     let amount = 0;
@@ -58,7 +58,7 @@ paymentsRouter.post(
 
     if (body.purpose === 'wallet_recharge') {
       const offer = body.offerId
-        ? one<{ payAmount: number; bonusAmount: number; label: string; active: number }>(
+        ? await one<{ payAmount: number; bonusAmount: number; label: string; active: number }>(
             'SELECT * FROM recharge_offers WHERE id = ? AND salonId = ?',
             body.offerId,
             salonId,
@@ -72,7 +72,7 @@ paymentsRouter.post(
       if (amount < 10000) throw badRequest('The minimum wallet recharge is \u20b9100.');
     } else {
       if (!body.appointmentId) throw badRequest('Which appointment is this payment for?');
-      const appt = one<Record<string, any>>(
+      const appt = await one<Record<string, any>>(
         'SELECT * FROM appointments WHERE id = ? AND customerId = ?',
         body.appointmentId,
         customerId,
@@ -85,7 +85,7 @@ paymentsRouter.post(
       if (amount <= 0) throw badRequest('There is nothing left to pay on that appointment.');
     }
 
-    const order = createOrder({
+    const order = await createOrder({
       salonId,
       customerId,
       amount,
@@ -113,19 +113,19 @@ paymentsRouter.post(
           }),
         });
         if (!res.ok) {
-          markFailed(order.id, `razorpay_order_failed_${res.status}`);
+          await markFailed(order.id, `razorpay_order_failed_${res.status}`);
           throw badRequest('Could not reach the payment provider. Please try again.');
         }
         const data = (await res.json()) as { id: string };
-        attachRazorpayOrderId(order.id, data.id);
+        await attachRazorpayOrderId(order.id, data.id);
       } catch (err) {
         if (err instanceof HttpError) throw err;
-        markFailed(order.id, `razorpay_order_error:${(err as Error).message}`);
+        await markFailed(order.id, `razorpay_order_error:${(err as Error).message}`);
         throw badRequest('Could not reach the payment provider. Please try again.');
       }
     }
 
-    const fresh = getOrder(order.id)!;
+    const fresh = (await getOrder(order.id))!;
     res.status(201).json({
       order: toPaymentOrder(fresh),
       checkout: {
@@ -152,7 +152,7 @@ paymentsRouter.post(
 /* ------------------------------------------------------------------ */
 
 export interface RechargeResult {
-  wallet?: ReturnType<typeof walletView>;
+  wallet?: Wallet;
   credited: boolean;
   reason?: string;
 }
@@ -161,25 +161,33 @@ export interface RechargeResult {
  * Credit a verified wallet recharge. Split into two ledger rows so cash and
  * bonus stay auditable separately. Idempotent on the payment id.
  */
-export function applyRecharge(orderId: string, paymentId: string, eventRef: string): RechargeResult {
-  const order = getOrder(orderId);
-  if (!order) throw notFound('Payment order not found.');
-  const notes = parseOrderNotes(order);
-  const bonus = Number(notes.bonus ?? 0);
+export function applyRecharge(orderId: string, paymentId: string, eventRef: string): Promise<RechargeResult> {
+  return tx(async () => {
+    const order = await getOrder(orderId);
+    if (!order) throw notFound('Payment order not found.');
+    const notes = parseOrderNotes(order);
+    const bonus = Number(notes.bonus ?? 0);
 
-  return tx(() => {
-    const fresh = getOrder(orderId)!;
+    const fresh = (await getOrder(orderId))!;
     if (fresh.status === 'paid' && fresh.paymentId === paymentId) {
-      const existing = one('SELECT id FROM wallet_transactions WHERE paymentId = ? AND type = ?', paymentId, 'recharge');
+      const existing = await one(
+        'SELECT id FROM wallet_transactions WHERE paymentId = ? AND type = ?',
+        paymentId,
+        'recharge',
+      );
       if (existing) {
-        return { credited: false, reason: 'already_credited', wallet: walletView(order.salonId, order.customerId) };
+        return {
+          credited: false,
+          reason: 'already_credited',
+          wallet: await walletView(order.salonId, order.customerId),
+        };
       }
     }
 
-    markPaid(orderId, paymentId, null);
+    await markPaid(orderId, paymentId, null);
 
-    const wallet = getOrCreateWallet(order.salonId, order.customerId);
-    creditCash({
+    const wallet = await getOrCreateWallet(order.salonId, order.customerId);
+    await creditCash({
       walletId: wallet.id,
       customerId: order.customerId,
       salonId: order.salonId,
@@ -191,7 +199,7 @@ export function applyRecharge(orderId: string, paymentId: string, eventRef: stri
       reason: 'Wallet recharge',
     });
     if (bonus > 0) {
-      creditBonus({
+      await creditBonus({
         walletId: wallet.id,
         customerId: order.customerId,
         salonId: order.salonId,
@@ -204,8 +212,8 @@ export function applyRecharge(orderId: string, paymentId: string, eventRef: stri
       });
     }
 
-    const view = walletView(order.salonId, order.customerId);
-    notifyCustomer({
+    const view = await walletView(order.salonId, order.customerId);
+    await notifyCustomer({
       salonId: order.salonId,
       customerId: order.customerId,
       template: 'wallet_credit',
@@ -214,7 +222,7 @@ export function applyRecharge(orderId: string, paymentId: string, eventRef: stri
       vars: { amount: formatMoney(order.amount + bonus), balance: formatMoney(view.totalBalance) },
     });
 
-    run(
+    await run(
       'INSERT INTO audit_logs (id, actorId, action, entityType, entityId, meta, ip, timestamp) VALUES (?,?,?,?,?,?,?,?)',
       crypto.randomUUID(),
       order.customerId,
@@ -230,24 +238,24 @@ export function applyRecharge(orderId: string, paymentId: string, eventRef: stri
   });
 }
 
-function settleAppointmentPayment(orderId: string, paymentId: string) {
-  const order = getOrder(orderId);
+async function settleAppointmentPayment(orderId: string, paymentId: string) {
+  const order = await getOrder(orderId);
   if (!order || !order.referenceId) return;
-  const appt = one<Record<string, any>>('SELECT * FROM appointments WHERE id = ?', order.referenceId);
+  const appt = await one<Record<string, any>>('SELECT * FROM appointments WHERE id = ?', order.referenceId);
   if (!appt) return;
   if (appt.paymentStatus === 'paid') return;
-  run(
+  await run(
     "UPDATE appointments SET paidAmount = totalAmount, paymentStatus = 'paid', paymentMethod = 'online', updatedAt = ? WHERE id = ?",
     new Date().toISOString(),
     appt.id,
   );
-  markPaid(orderId, paymentId, null);
+  await markPaid(orderId, paymentId, null);
 }
 
 paymentsRouter.post(
   '/verify',
   requireAuth,
-  handler((req, res) => {
+  handler(async (req, res) => {
     const body = z
       .object({
         razorpayOrderId: z.string(),
@@ -256,31 +264,36 @@ paymentsRouter.post(
       })
       .parse(req.body);
 
-    const order = getOrderByRazorpayId(body.razorpayOrderId);
+    const order = await getOrderByRazorpayId(body.razorpayOrderId);
     if (!order) throw notFound('Payment order not found.');
     if (order.customerId !== req.auth!.id && req.auth!.role === 'customer') {
       throw badRequest('That payment does not belong to this account.');
     }
     if (order.status === 'paid') {
-      return res.json({ ok: true, alreadyProcessed: true, order: toPaymentOrder(order), wallet: walletView(order.salonId, order.customerId) });
+      return res.json({
+        ok: true,
+        alreadyProcessed: true,
+        order: toPaymentOrder(order),
+        wallet: await walletView(order.salonId, order.customerId),
+      });
     }
 
     /* Server-side signature verification. Never trust the client's "success". */
     const valid = verifyCheckoutSignature(body.razorpayOrderId, body.razorpayPaymentId, body.razorpaySignature);
     if (!valid) {
-      markFailed(order.id, 'signature_mismatch');
+      await markFailed(order.id, 'signature_mismatch');
       throw badRequest('We could not verify that payment. No money has been moved.');
     }
 
-    claimEvent(`checkout:${body.razorpayPaymentId}`, 'checkout.verified', order.id, body);
+    await claimEvent(`checkout:${body.razorpayPaymentId}`, 'checkout.verified', order.id, body);
 
     if (order.purpose === 'wallet_recharge') {
-      const result = applyRecharge(order.id, body.razorpayPaymentId, 'checkout');
-      return res.json({ ok: true, ...result, order: toPaymentOrder(getOrder(order.id)!) });
+      const result = await applyRecharge(order.id, body.razorpayPaymentId, 'checkout');
+      return res.json({ ok: true, ...result, order: toPaymentOrder((await getOrder(order.id))!) });
     }
 
-    settleAppointmentPayment(order.id, body.razorpayPaymentId);
-    res.json({ ok: true, credited: true, order: toPaymentOrder(getOrder(order.id)!) });
+    await settleAppointmentPayment(order.id, body.razorpayPaymentId);
+    res.json({ ok: true, credited: true, order: toPaymentOrder((await getOrder(order.id))!) });
   }),
 );
 
@@ -296,22 +309,22 @@ paymentsRouter.post(
 paymentsRouter.post(
   '/simulate',
   requireAuth,
-  handler((req, res) => {
+  handler(async (req, res) => {
     if (integrations.razorpayLive) throw badRequest('Live Razorpay keys are configured — use Razorpay Checkout.');
     if (!env.allowPaymentSimulation) throw badRequest('Payment simulation is disabled.');
     const body = z
       .object({ razorpayOrderId: z.string(), outcome: z.enum(['success', 'failure']).default('success') })
       .parse(req.body);
 
-    const order = getOrderByRazorpayId(body.razorpayOrderId);
+    const order = await getOrderByRazorpayId(body.razorpayOrderId);
     if (!order) throw notFound('Payment order not found.');
     if (order.customerId !== req.auth!.id) throw badRequest('That payment does not belong to this account.');
 
     if (body.outcome === 'failure') {
-      markAttempted(order.id);
-      markFailed(order.id, 'simulated_failure');
-      claimEvent(`sim_fail:${order.id}`, 'payment.failed', order.id, { simulated: true });
-      return res.json({ ok: false, status: 'failed', order: toPaymentOrder(getOrder(order.id)!) });
+      await markAttempted(order.id);
+      await markFailed(order.id, 'simulated_failure');
+      await claimEvent(`sim_fail:${order.id}`, 'payment.failed', order.id, { simulated: true });
+      return res.json({ ok: false, status: 'failed', order: toPaymentOrder((await getOrder(order.id))!) });
     }
 
     const paymentId = `pay_sim_${order.id}`;
@@ -319,13 +332,13 @@ paymentsRouter.post(
     const valid = verifyCheckoutSignature(order.razorpayOrderId, paymentId, signature);
     if (!valid) throw conflict('Simulated signature failed verification.');
 
-    claimEvent(`sim_ok:${paymentId}`, 'payment.captured', order.id, { simulated: true });
+    await claimEvent(`sim_ok:${paymentId}`, 'payment.captured', order.id, { simulated: true });
     if (order.purpose === 'wallet_recharge') {
-      const result = applyRecharge(order.id, paymentId, 'simulated');
-      return res.json({ ok: true, simulated: true, ...result, order: toPaymentOrder(getOrder(order.id)!) });
+      const result = await applyRecharge(order.id, paymentId, 'simulated');
+      return res.json({ ok: true, simulated: true, ...result, order: toPaymentOrder((await getOrder(order.id))!) });
     }
-    settleAppointmentPayment(order.id, paymentId);
-    res.json({ ok: true, simulated: true, order: toPaymentOrder(getOrder(order.id)!) });
+    await settleAppointmentPayment(order.id, paymentId);
+    res.json({ ok: true, simulated: true, order: toPaymentOrder((await getOrder(order.id))!) });
   }),
 );
 
@@ -336,7 +349,7 @@ paymentsRouter.post(
 paymentsRouter.post(
   '/webhook',
   express.raw({ type: '*/*', limit: '1mb' }),
-  handler((req, res) => {
+  handler(async (req, res) => {
     const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : JSON.stringify(req.body ?? {});
     const signature = String(req.headers['x-razorpay-signature'] ?? '');
 
@@ -358,30 +371,30 @@ paymentsRouter.post(
     const orderId: string | undefined = paymentEntity.order_id;
 
     if (!eventId) throw badRequest('Webhook is missing an event id.');
-    if (!claimEvent(eventId, type, null, payload)) {
+    if (!(await claimEvent(eventId, type, null, payload))) {
       return res.json({ ok: true, duplicate: true });
     }
 
-    const order = orderId ? getOrderByRazorpayId(orderId) : undefined;
+    const order = orderId ? await getOrderByRazorpayId(orderId) : undefined;
     if (!order) return res.json({ ok: true, ignored: 'unknown_order' });
 
     if (type === 'payment.captured' || type === 'order.paid') {
       const paymentId = String(paymentEntity.id ?? `pay_wh_${order.id}`);
-      if (order.purpose === 'wallet_recharge') applyRecharge(order.id, paymentId, `webhook:${eventId}`);
-      else settleAppointmentPayment(order.id, paymentId);
+      if (order.purpose === 'wallet_recharge') await applyRecharge(order.id, paymentId, `webhook:${eventId}`);
+      else await settleAppointmentPayment(order.id, paymentId);
       return res.json({ ok: true, credited: true });
     }
 
     if (type === 'payment.failed') {
-      markFailed(order.id, `webhook:${type}`);
+      await markFailed(order.id, `webhook:${type}`);
       return res.json({ ok: true });
     }
 
     if (type === 'refund.processed' || type === 'refund.created') {
       const amount = Number(payload.payload?.refund?.entity?.amount ?? 0);
       if (amount > 0) {
-        run('UPDATE payment_orders SET status = ? WHERE id = ?', 'refunded', order.id);
-        run(
+        await run('UPDATE payment_orders SET status = ? WHERE id = ?', 'refunded', order.id);
+        await run(
           'INSERT INTO audit_logs (id, actorId, action, entityType, entityId, meta, ip, timestamp) VALUES (?,?,?,?,?,?,?,?)',
           crypto.randomUUID(),
           order.customerId,
@@ -407,19 +420,21 @@ paymentsRouter.post(
 paymentsRouter.get(
   '/config',
   requireAuth,
-  handler((_req, res) => {
+  handler(async (_req, res) => {
     res.json({ ...publicConfig(), currency: 'INR', spendingOrder: readSettings(null).spendingOrder });
   }),
 );
 paymentsRouter.get(
   '/orders',
   requireAuth,
-  handler((req, res) => {
-    const salonId = scopedSalonId(req.auth!);
-    const orders = all(
-      'SELECT * FROM payment_orders WHERE customerId = ? AND salonId = ? ORDER BY createdAt DESC LIMIT 50',
-      req.auth!.id,
-      salonId,
+  handler(async (req, res) => {
+    const salonId = await scopedSalonId(req.auth!);
+    const orders = (
+      await all(
+        'SELECT * FROM payment_orders WHERE customerId = ? AND salonId = ? ORDER BY createdAt DESC LIMIT 50',
+        req.auth!.id,
+        salonId,
+      )
     ).map((o) => toPaymentOrder(o));
     res.json({ orders });
   }),
@@ -428,10 +443,10 @@ paymentsRouter.get(
 paymentsRouter.post(
   '/orders/:id/fail',
   requireAuth,
-  handler((req, res) => {
-    const order = getOrder(req.params.id!);
+  handler(async (req, res) => {
+    const order = await getOrder(req.params.id!);
     if (!order || order.customerId !== req.auth!.id) throw notFound('Payment order not found.');
-    markFailed(order.id, 'cancelled_by_customer');
+    await markFailed(order.id, 'cancelled_by_customer');
     res.json({ ok: true });
   }),
 );

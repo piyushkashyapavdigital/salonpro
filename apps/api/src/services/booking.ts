@@ -24,8 +24,8 @@ import * as referralService from './referral';
 /* Services & pricing                                                  */
 /* ------------------------------------------------------------------ */
 
-export function serviceRows(salonId: string, ids: string[]) {
-  if (!ids.length) return [];
+export function serviceRows(salonId: string, ids: string[]): Promise<DbRow[]> {
+  if (!ids.length) return Promise.resolve([]);
   const placeholders = ids.map(() => '?').join(',');
   return all<DbRow>(
     `SELECT * FROM services WHERE salonId = ? AND id IN (${placeholders})`,
@@ -34,26 +34,28 @@ export function serviceRows(salonId: string, ids: string[]) {
   );
 }
 
-export function resolveServices(salonId: string, branchId: string, serviceIds: string[]): AppointmentService[] {
+export async function resolveServices(salonId: string, branchId: string, serviceIds: string[]): Promise<AppointmentService[]> {
   if (!serviceIds.length) throw badRequest('Select at least one service.');
-  const rows = serviceRows(salonId, serviceIds);
+  const rows = await serviceRows(salonId, serviceIds);
   if (rows.length !== new Set(serviceIds).size) throw badRequest('One or more services could not be found.');
-  return serviceIds.map((id) => {
+  const resolved: AppointmentService[] = [];
+  for (const id of serviceIds) {
     const row = rows.find((r) => r.id === id)!;
     if (!row.active) throw badRequest(`"${row.name}" is no longer available.`);
-    const override = one<{ price: number | null; active: number }>(
+    const override = await one<{ price: number | null; active: number }>(
       'SELECT price, active FROM branch_services WHERE branchId = ? AND serviceId = ?',
       branchId,
       id,
     );
     if (override && !override.active) throw badRequest(`"${row.name}" is not offered at this branch.`);
-    return {
+    resolved.push({
       serviceId: row.id,
       name: row.name,
       price: override?.price ?? row.price,
       durationMinutes: row.durationMinutes,
-    };
-  });
+    });
+  }
+  return resolved;
 }
 
 export function totalDuration(services: AppointmentService[]) {
@@ -76,8 +78,8 @@ export function couponDiscount(coupon: DbRow, amount: number): number {
   return Math.max(0, Math.min(discount, amount));
 }
 
-export function findCoupon(salonId: string, code: string): { coupon: DbRow; discount: number } | null {
-  const coupon = one<DbRow>(
+export async function findCoupon(salonId: string, code: string): Promise<{ coupon: DbRow; discount: number } | null> {
+  const coupon = await one<DbRow>(
     'SELECT * FROM coupons WHERE salonId = ? AND UPPER(code) = UPPER(?) AND active = 1',
     salonId,
     code,
@@ -85,8 +87,8 @@ export function findCoupon(salonId: string, code: string): { coupon: DbRow; disc
   return coupon ? { coupon, discount: 0 } : null;
 }
 
-export function validateCoupon(salonId: string, code: string, amount: number) {
-  const found = findCoupon(salonId, code);
+export async function validateCoupon(salonId: string, code: string, amount: number) {
+  const found = await findCoupon(salonId, code);
   if (!found) throw notFound('That coupon code is not valid.');
   const { coupon } = found;
   const now = new Date().toISOString();
@@ -139,29 +141,31 @@ export interface CreateBookingArgs {
   idempotencyKey?: string | null;
 }
 
-export function createBooking(args: CreateBookingArgs): { appointment: Appointment; walletDebit: number } {
-  return tx(() => {
+export function createBooking(args: CreateBookingArgs): Promise<{ appointment: Appointment; walletDebit: number }> {
+  return tx(async () => {
     const settings = readSettings(
-      one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', args.salonId)?.settings,
+      (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', args.salonId))?.settings,
     );
 
     /* Idempotent replay: identical key returns the same appointment. */
     if (args.idempotencyKey) {
-      const existing = one<DbRow>('SELECT * FROM appointments WHERE idempotencyKey = ?', args.idempotencyKey);
-      if (existing) return { appointment: hydrateAppointment(existing), walletDebit: existing.paidAmount };
+      const existing = await one<DbRow>('SELECT * FROM appointments WHERE idempotencyKey = ?', args.idempotencyKey);
+      if (existing) {
+        return { appointment: await hydrateAppointment(existing), walletDebit: existing.paidAmount };
+      }
     }
 
-    const branch = one<DbRow>('SELECT * FROM branches WHERE id = ? AND salonId = ?', args.branchId, args.salonId);
+    const branch = await one<DbRow>('SELECT * FROM branches WHERE id = ? AND salonId = ?', args.branchId, args.salonId);
     if (!branch) throw notFound('Branch not found.');
     if (branch.status !== 'active') throw badRequest('That branch is not accepting bookings.');
 
-    const services = resolveServices(args.salonId, args.branchId, args.serviceIds);
+    const services = await resolveServices(args.salonId, args.branchId, args.serviceIds);
     const duration = totalDuration(services);
     const start = timeToMinutes(args.startTime);
     const end = start + duration;
 
-    /* ---- concurrency-safe conflict check (inside BEGIN IMMEDIATE) ---- */
-    const staffId = pickAvailableStaff(args.branchId, args.date, start, end, args.staffId ?? null);
+    /* ---- concurrency-safe conflict check (inside the transaction) ---- */
+    const staffId = await pickAvailableStaff(args.branchId, args.date, start, end, args.staffId ?? null);
     if (!staffId) {
       throw conflict('That time slot was just taken. Please choose another slot.', {
         code: 'slot_unavailable',
@@ -172,7 +176,7 @@ export function createBooking(args: CreateBookingArgs): { appointment: Appointme
     let discount = 0;
     let coupon: DbRow | null = null;
     if (args.couponCode) {
-      const validated = validateCoupon(args.salonId, args.couponCode, subtotal);
+      const validated = await validateCoupon(args.salonId, args.couponCode, subtotal);
       coupon = validated.coupon;
       discount = validated.discount;
     }
@@ -180,12 +184,12 @@ export function createBooking(args: CreateBookingArgs): { appointment: Appointme
 
     /* ---- referral attribution ---- */
     let referralId: string | null = null;
-    const referredBy = referralService.resolveAttribution(args.customerId, args.salonId, args.referralToken ?? null);
+    const referredBy = await referralService.resolveAttribution(args.customerId, args.salonId, args.referralToken ?? null);
     if (referredBy) referralId = referredBy.id;
 
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
-    run(
+    await run(
       `INSERT INTO appointments
         (id, salonId, branchId, customerId, staffId, servicesJson, date, startTime, endTime, durationMinutes,
          status, bookingSource, referralId, couponCode, subtotal, discount, totalAmount, paidAmount,
@@ -219,8 +223,8 @@ export function createBooking(args: CreateBookingArgs): { appointment: Appointme
     );
 
     if (coupon) {
-      run('UPDATE coupons SET usedCount = usedCount + 1 WHERE id = ?', coupon.id);
-      run(
+      await run('UPDATE coupons SET usedCount = usedCount + 1 WHERE id = ?', coupon.id);
+      await run(
         'INSERT INTO coupon_redemptions (id, couponId, customerId, appointmentId, amount, createdAt) VALUES (?,?,?,?,?,?)',
         crypto.randomUUID(),
         coupon.id,
@@ -234,15 +238,15 @@ export function createBooking(args: CreateBookingArgs): { appointment: Appointme
     /* ---- wallet payment at booking (optional) ---- */
     let walletDebit = 0;
     if (args.paymentPreference === 'wallet' && total > 0) {
-      const w = walletService.getOrCreateWallet(args.salonId, args.customerId);
-      const b = walletService.balances(w.id);
+      const w = await walletService.getOrCreateWallet(args.salonId, args.customerId);
+      const b = await walletService.balances(w.id);
       if (b.total < total) {
         throw conflict('Insufficient wallet balance for this booking.', {
           required: total,
           available: b.total,
         });
       }
-      walletService.debit({
+      await walletService.debit({
         walletId: w.id,
         customerId: args.customerId,
         salonId: args.salonId,
@@ -254,14 +258,14 @@ export function createBooking(args: CreateBookingArgs): { appointment: Appointme
         type: 'spend',
       });
       walletDebit = total;
-      run(
+      await run(
         "UPDATE appointments SET paidAmount = ?, paymentStatus = 'paid', paymentMethod = 'wallet' WHERE id = ?",
         total,
         id,
       );
     }
 
-    audit(args.auth.id, 'appointment.create', 'appointment', id, {
+    await audit(args.auth.id, 'appointment.create', 'appointment', id, {
       branchId: args.branchId,
       customerId: args.customerId,
       staffId,
@@ -269,18 +273,18 @@ export function createBooking(args: CreateBookingArgs): { appointment: Appointme
       source: args.bookingSource,
     });
 
-    const created = one<DbRow>('SELECT * FROM appointments WHERE id = ?', id)!;
-    return { appointment: hydrateAppointment(created), walletDebit };
+    const created = (await one<DbRow>('SELECT * FROM appointments WHERE id = ?', id))!;
+    return { appointment: await hydrateAppointment(created), walletDebit };
   });
 }
 
-export function hydrateAppointment(row: DbRow): Appointment {
-  const customer = one<{ name: string; phone: string }>(
+export async function hydrateAppointment(row: DbRow): Promise<Appointment> {
+  const customer = await one<{ name: string; phone: string }>(
     'SELECT name, phone FROM users WHERE id = ?',
     row.customerId,
   );
   const staff = row.staffId
-    ? one<{ name: string; designation: string }>(
+    ? await one<{ name: string; designation: string }>(
         'SELECT u.name, s.designation FROM staff s JOIN users u ON u.id = s.userId WHERE s.id = ?',
         row.staffId,
       )
@@ -347,15 +351,15 @@ export interface StatusChangeArgs {
  * stamps the customer profile and triggers referral qualification — all inside
  * one transaction so a partial completion is impossible.
  */
-export function changeStatus(args: StatusChangeArgs): Appointment {
-  return tx(() => {
-    const appt = one<DbRow>('SELECT * FROM appointments WHERE id = ?', args.appointmentId);
+export function changeStatus(args: StatusChangeArgs): Promise<Appointment> {
+  return tx(async () => {
+    const appt = await one<DbRow>('SELECT * FROM appointments WHERE id = ?', args.appointmentId);
     if (!appt) throw notFound('Appointment not found.');
     assertBranchAccess(args.auth, appt.branchId);
     assertTransition(appt.status as AppointmentStatus, args.status);
 
     const settings = readSettings(
-      one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', appt.salonId)?.settings,
+      (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', appt.salonId))?.settings,
     );
     const now = new Date().toISOString();
 
@@ -368,8 +372,8 @@ export function changeStatus(args: StatusChangeArgs): Appointment {
       let onlineAmount = appt.paymentMethod === 'online' ? appt.paidAmount : 0;
 
       if (due > 0 && method === 'wallet') {
-        const w = walletService.getOrCreateWallet(appt.salonId, appt.customerId);
-        walletService.debit({
+        const w = await walletService.getOrCreateWallet(appt.salonId, appt.customerId);
+        await walletService.debit({
           walletId: w.id,
           customerId: appt.customerId,
           salonId: appt.salonId,
@@ -389,7 +393,7 @@ export function changeStatus(args: StatusChangeArgs): Appointment {
 
       const paidAmount = appt.totalAmount;
 
-      run(
+      await run(
         `INSERT INTO service_records
            (id, appointmentId, customerId, staffId, salonId, branchId, servicesJson, grossAmount, discount,
             finalAmount, paymentMethod, walletAmount, onlineAmount, cashAmount, completedAt, createdAt)
@@ -413,7 +417,7 @@ export function changeStatus(args: StatusChangeArgs): Appointment {
         now,
       );
 
-      const existingProfile = one<DbRow>(
+      const existingProfile = await one<DbRow>(
         'SELECT * FROM customer_profiles WHERE customerId = ?',
         appt.customerId,
       );
@@ -423,7 +427,7 @@ export function changeStatus(args: StatusChangeArgs): Appointment {
       services.forEach((s) => preferred.add(s.serviceId));
 
       if (existingProfile) {
-        run(
+        await run(
           `UPDATE customer_profiles
               SET lastVisitAt = ?, totalVisits = totalVisits + 1,
                   totalCompletedSpend = totalCompletedSpend + ?, preferredServices = ?
@@ -434,7 +438,7 @@ export function changeStatus(args: StatusChangeArgs): Appointment {
           appt.customerId,
         );
       } else {
-        run(
+        await run(
           `INSERT INTO customer_profiles (customerId, salonId, lastVisitAt, totalVisits, totalCompletedSpend, preferredServices, marketingConsent, createdAt)
            VALUES (?,?,?,?,?,?,?,?)`,
           appt.customerId,
@@ -451,9 +455,9 @@ export function changeStatus(args: StatusChangeArgs): Appointment {
       if (settings.loyaltyEnabled) {
         const points = Math.floor((appt.totalAmount / 10000) * settings.loyaltyPointsPerHundred);
         if (points > 0) {
-          const acc = one<DbRow>('SELECT * FROM loyalty_accounts WHERE customerId = ?', appt.customerId);
+          const acc = await one<DbRow>('SELECT * FROM loyalty_accounts WHERE customerId = ?', appt.customerId);
           if (acc) {
-            run(
+            await run(
               'UPDATE loyalty_accounts SET points = points + ?, lifetimePoints = lifetimePoints + ?, updatedAt = ? WHERE customerId = ?',
               points,
               points,
@@ -461,7 +465,7 @@ export function changeStatus(args: StatusChangeArgs): Appointment {
               appt.customerId,
             );
           } else {
-            run(
+            await run(
               'INSERT INTO loyalty_accounts (customerId, points, lifetimePoints, updatedAt) VALUES (?,?,?,?)',
               appt.customerId,
               points,
@@ -469,7 +473,7 @@ export function changeStatus(args: StatusChangeArgs): Appointment {
               now,
             );
           }
-          run(
+          await run(
             'INSERT INTO loyalty_transactions (id, customerId, points, reason, referenceId, createdAt) VALUES (?,?,?,?,?,?)',
             crypto.randomUUID(),
             appt.customerId,
@@ -481,7 +485,7 @@ export function changeStatus(args: StatusChangeArgs): Appointment {
         }
       }
 
-      run(
+      await run(
         "UPDATE appointments SET status = 'completed', paidAmount = ?, paymentStatus = 'paid', paymentMethod = ?, updatedAt = ? WHERE id = ?",
         paidAmount,
         method,
@@ -490,13 +494,13 @@ export function changeStatus(args: StatusChangeArgs): Appointment {
       );
 
       /* Referral qualification happens only on a completed, paid first visit. */
-      referralService.qualifyForAppointment(appt.id);
-      audit(args.auth.id, 'appointment.complete', 'appointment', appt.id, {
+      await referralService.qualifyForAppointment(appt.id);
+      await audit(args.auth.id, 'appointment.complete', 'appointment', appt.id, {
         finalAmount: appt.totalAmount,
         method,
       });
     } else {
-      run(
+      await run(
         'UPDATE appointments SET status = ?, cancelledReason = COALESCE(?, cancelledReason), updatedAt = ? WHERE id = ?',
         args.status,
         args.reason ?? null,
@@ -507,13 +511,13 @@ export function changeStatus(args: StatusChangeArgs): Appointment {
       if (args.status === 'cancelled' || args.status === 'no_show') {
         /* Release prepaid wallet funds back to the customer (append-only refund rows). */
         if (appt.paidAmount > 0 && appt.paymentMethod === 'wallet') {
-          const spent = all<DbRow>(
+          const spent = await all<DbRow>(
             "SELECT * FROM wallet_transactions WHERE referenceId = ? AND type = 'spend' AND status = 'posted'",
             appt.id,
           );
           let i = 0;
           for (const entry of spent) {
-            walletService.postEntry({
+            await walletService.postEntry({
               walletId: entry.walletId,
               customerId: entry.customerId,
               salonId: entry.salonId,
@@ -526,19 +530,19 @@ export function changeStatus(args: StatusChangeArgs): Appointment {
               actorId: args.auth.id,
             });
           }
-          run(
+          await run(
             "UPDATE appointments SET paidAmount = 0, paymentStatus = 'refunded' WHERE id = ?",
             appt.id,
           );
         }
-        referralService.reverseIfQualifyingCancelled(appt.id);
+        await referralService.reverseIfQualifyingCancelled(appt.id);
       }
-      audit(args.auth.id, `appointment.${args.status}`, 'appointment', appt.id, {
+      await audit(args.auth.id, `appointment.${args.status}`, 'appointment', appt.id, {
         reason: args.reason ?? null,
       });
     }
 
-    return hydrateAppointment(one<DbRow>('SELECT * FROM appointments WHERE id = ?', appt.id)!);
+    return await hydrateAppointment((await one<DbRow>('SELECT * FROM appointments WHERE id = ?', appt.id))!);
   });
 }
 
@@ -558,7 +562,7 @@ export interface AppointmentQuery {
   limit?: number;
 }
 
-export function listAppointments(q: AppointmentQuery): Appointment[] {
+export async function listAppointments(q: AppointmentQuery): Promise<Appointment[]> {
   const clauses = ['a.salonId = ?'];
   const params: (string | number)[] = [q.salonId];
   if (q.branchIds && q.branchIds.length) {
@@ -590,22 +594,22 @@ export function listAppointments(q: AppointmentQuery): Appointment[] {
     params.push(q.staffId);
   }
   params.push(q.limit ?? 200);
-  const rows = all<DbRow>(
+  const rows = await all<DbRow>(
     `SELECT a.* FROM appointments a WHERE ${clauses.join(' AND ')}
       ORDER BY a.date DESC, a.startTime DESC LIMIT ?`,
     ...params,
   );
-  return rows.map(hydrateAppointment);
+  const out: Appointment[] = [];
+  for (const row of rows) out.push(await hydrateAppointment(row));
+  return out;
 }
 
-export function getAppointment(id: string): Appointment | null {
-  const row = one<DbRow>('SELECT * FROM appointments WHERE id = ?', id);
+export async function getAppointment(id: string): Promise<Appointment | null> {
+  const row = await one<DbRow>('SELECT * FROM appointments WHERE id = ?', id);
   if (!row) return null;
-  const appt = hydrateAppointment(row);
-  appt.serviceRecords = all<DbRow>(
-    'SELECT * FROM service_records WHERE appointmentId = ?',
-    id,
-  ).map((r) => ({
+  const appt = await hydrateAppointment(row);
+  const records = await all<DbRow>('SELECT * FROM service_records WHERE appointmentId = ?', id);
+  appt.serviceRecords = records.map((r) => ({
     id: r.id,
     appointmentId: r.appointmentId,
     customerId: r.customerId,
@@ -624,18 +628,21 @@ export function getAppointment(id: string): Appointment | null {
   return appt;
 }
 
-export function upcomingForCustomer(customerId: string): Appointment[] {
+export async function upcomingForCustomer(customerId: string): Promise<Appointment[]> {
   const today = new Date().toISOString().slice(0, 10);
-  return all<DbRow>(
+  const rows = await all<DbRow>(
     `SELECT * FROM appointments
       WHERE customerId = ? AND date >= ? AND status IN ('booked','confirmed','checked_in','in_progress')
       ORDER BY date ASC, startTime ASC LIMIT 5`,
     customerId,
     today,
-  ).map(hydrateAppointment);
+  );
+  const out: Appointment[] = [];
+  for (const row of rows) out.push(await hydrateAppointment(row));
+  return out;
 }
 
-export function countUpcoming(customerId: string): number {
+export function countUpcoming(customerId: string): Promise<number> {
   const today = new Date().toISOString().slice(0, 10);
   return scalar<number>(
     `SELECT COUNT(*) FROM appointments

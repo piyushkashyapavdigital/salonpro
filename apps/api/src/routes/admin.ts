@@ -43,6 +43,11 @@ function scope(req: Parameters<typeof SCOPED>[0]) {
   return SCOPED(req);
 }
 
+/** `today` as a YYYY-MM-DD string — the format every date column stores. */
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function csv(rows: (string | number | null | undefined)[][]) {
   return rows
     .map((row) =>
@@ -68,21 +73,18 @@ function sendCsv(res: import('express').Response, filename: string, rows: (strin
 
 adminRouter.get(
   '/overview',
-  handler((req, res) => {
-    const { salonId, branchIds } = scope(req);
+  handler(async (req, res) => {
+    const { salonId, branchIds } = await scope(req);
     const date = req.query.date ? dateSchema.parse(req.query.date) : isoDate();
-    const overview = todayOverview({ salonId, branchIds }, date);
-    const salon = one<{ name: string; settings: string }>('SELECT name, settings FROM salons WHERE id = ?', salonId);
-    const settings = readSettings(salon?.settings);
     res.json({
-      overview,
-      settings,
+      overview: await todayOverview({ salonId, branchIds }, date),
+      settings: readSettings((await one<{ name: string; settings: string }>('SELECT name, settings FROM salons WHERE id = ?', salonId))?.settings),
       payments: { mode: PAYMENT_MODE },
-      upcomingToday: listAppointments({ salonId, branchIds, date, limit: 12 }),
-      referralStats: salonReferralStats(salonId),
-      reminderStats: notificationStats(salonId),
-      topCustomers: topCustomers({ salonId, branchIds }, { limit: 5 }),
-      trend: dailyTrend({ salonId, branchIds }, date, 7),
+      upcomingToday: await listAppointments({ salonId, branchIds, date, limit: 12 }),
+      referralStats: await salonReferralStats(salonId),
+      reminderStats: await notificationStats(salonId),
+      topCustomers: await topCustomers({ salonId, branchIds }, { limit: 5 }),
+      trend: await dailyTrend({ salonId, branchIds }, date, 7),
     });
   }),
 );
@@ -93,8 +95,8 @@ adminRouter.get(
 
 adminRouter.get(
   '/appointments',
-  handler((req, res) => {
-    const { salonId, branchIds } = scope(req);
+  handler(async (req, res) => {
+    const { salonId, branchIds } = await scope(req);
     const query = z
       .object({
         date: dateSchema.optional(),
@@ -109,33 +111,34 @@ adminRouter.get(
       .parse(req.query);
     const scopedBranches = query.branchId ? branchIds.filter((b) => b === query.branchId) : branchIds;
     if (query.branchId && !scopedBranches.length) throw forbidden('You are not authorised for that branch.');
-    const appointments = listAppointments({
-      salonId,
-      branchIds: scopedBranches,
-      date: query.date,
-      from: query.from,
-      to: query.to,
-      status: query.status as never,
-      staffId: query.staffId,
-      customerId: query.customerId,
-      limit: query.limit,
+    res.json({
+      appointments: await listAppointments({
+        salonId,
+        branchIds: scopedBranches,
+        date: query.date,
+        from: query.from,
+        to: query.to,
+        status: query.status as never,
+        staffId: query.staffId,
+        customerId: query.customerId,
+        limit: query.limit,
+      }),
     });
-    res.json({ appointments });
   }),
 );
 
 adminRouter.get(
   '/appointments/calendar',
-  handler((req, res) => {
-    const { salonId, branchIds } = scope(req);
+  handler(async (req, res) => {
+    const { salonId, branchIds } = await scope(req);
     const query = z
       .object({ date: dateSchema, branchId: z.string().optional(), staffId: z.string().optional() })
       .parse(req.query);
-    const staff = all(
+    const staff = await all(
       "SELECT s.id, u.name, s.designation, s.branchId FROM staff s JOIN users u ON u.id = s.userId WHERE s.salonId = ? AND s.status = 'active'",
       salonId,
     );
-    const appointments = listAppointments({
+    const appointments = await listAppointments({
       salonId,
       branchIds: branchIds.filter((b) => (query.branchId ? b === query.branchId : true)),
       date: query.date,
@@ -143,19 +146,25 @@ adminRouter.get(
       limit: 300,
     });
     const branch = query.branchId
-      ? one('SELECT * FROM branches WHERE id = ?', query.branchId)
-      : one('SELECT * FROM branches WHERE salonId = ? ORDER BY name LIMIT 1', salonId);
+      ? await one('SELECT * FROM branches WHERE id = ?', query.branchId)
+      : await one('SELECT * FROM branches WHERE salonId = ? ORDER BY name LIMIT 1', salonId);
     const openingHours = branch ? parseJson(branch.openingHours, fullWeekHours()) : fullWeekHours();
-    res.json({ date: query.date, staff, appointments, openingHours, holidays: all('SELECT * FROM holidays WHERE date = ?', query.date) });
+    res.json({
+      date: query.date,
+      staff,
+      appointments,
+      openingHours,
+      holidays: await all('SELECT * FROM holidays WHERE date = ?', query.date),
+    });
   }),
 );
 
 adminRouter.get(
   '/appointments/:id',
-  handler((req, res) => {
-    const appt = getAppointment(req.params.id!);
+  handler(async (req, res) => {
+    const appt = await getAppointment(req.params.id!);
     if (!appt) throw notFound('Appointment not found.');
-    if (!scope(req).branchIds.includes(appt.branchId)) throw forbidden();
+    if (!(await scope(req)).branchIds.includes(appt.branchId)) throw forbidden();
     res.json({ appointment: appt });
   }),
 );
@@ -163,8 +172,8 @@ adminRouter.get(
 adminRouter.post(
   '/appointments',
   requireCapability(can.manageAppointments, 'Only owners, managers and receptionists can create bookings.'),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const body = z
       .object({
         customerId: z.string().optional(),
@@ -192,28 +201,28 @@ adminRouter.post(
         throw badRequest('Provide an existing customer or a name and phone number for the walk-in.');
       }
       const phone = body.customerPhone.replace(/\D/g, '').slice(-10);
-      const existing = one<{ id: string }>('SELECT id FROM users WHERE phone = ?', phone);
+      const existing = await one<{ id: string }>('SELECT id FROM users WHERE phone = ?', phone);
       if (existing) {
         customerId = existing.id;
       } else {
         const id = crypto.randomUUID();
         const now = new Date().toISOString();
-        tx(() => {
-          run('INSERT INTO users (id, name, phone, role, status, isDemo, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?)',
+        await tx(async () => {
+          await run('INSERT INTO users (id, name, phone, role, status, isDemo, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?)',
             id, body.customerName!, phone, 'customer', 'active', 0, now, now);
-          run('INSERT INTO customer_profiles (customerId, salonId, totalVisits, totalCompletedSpend, preferredServices, marketingConsent, createdAt) VALUES (?,?,?,?,?,?,?)',
+          await run('INSERT INTO customer_profiles (customerId, salonId, totalVisits, totalCompletedSpend, preferredServices, marketingConsent, createdAt) VALUES (?,?,?,?,?,?,?)',
             id, salonId, 0, 0, '[]', Number(req.body.marketingConsent !== false), now);
-          ensureReferralCode(salonId, id);
+          await ensureReferralCode(salonId, id);
         });
         customerId = id;
       }
     }
 
-    const result = createBooking({
+    const result = await createBooking({
       auth: req.auth!,
       salonId,
       branchId: body.branchId,
-      customerId,
+      customerId: customerId!,
       staffId: body.staffId ?? null,
       serviceIds: body.serviceIds,
       date: body.date,
@@ -231,7 +240,7 @@ adminRouter.post(
 adminRouter.post(
   '/appointments/:id/status',
   requireCapability(can.completeService, 'Your role cannot change appointment status.'),
-  handler((req, res) => {
+  handler(async (req, res) => {
     const body = z
       .object({
         status: z.enum(['booked', 'confirmed', 'checked_in', 'in_progress', 'completed', 'cancelled', 'no_show']),
@@ -239,49 +248,55 @@ adminRouter.post(
         paymentMethod: z.enum(['wallet', 'online', 'pay_at_salon', 'cash', 'upi_card']).optional(),
       })
       .parse(req.body);
-    const appt = getAppointment(req.params.id!);
+    const appt = await getAppointment(req.params.id!);
     if (!appt) throw notFound('Appointment not found.');
-    if (!scope(req).branchIds.includes(appt.branchId)) throw forbidden();
+    if (!(await scope(req)).branchIds.includes(appt.branchId)) throw forbidden();
     if (req.auth!.role === 'salon_staff' && !['in_progress', 'completed'].includes(body.status)) {
       throw forbidden('Stylists can only start or complete their own appointments.');
     }
-    const updated = changeStatus({
-      auth: req.auth!,
-      appointmentId: appt.id,
-      status: body.status,
-      reason: body.reason,
-      paymentMethod: body.paymentMethod,
+    res.json({
+      appointment: await changeStatus({
+        auth: req.auth!,
+        appointmentId: appt.id,
+        status: body.status,
+        reason: body.reason,
+        paymentMethod: body.paymentMethod,
+      }),
     });
-    res.json({ appointment: updated });
   }),
 );
 
 adminRouter.post(
   '/appointments/:id/no-show',
   requireCapability(can.manageAppointments),
-  handler((req, res) => {
-    const appt = getAppointment(req.params.id!);
+  handler(async (req, res) => {
+    const appt = await getAppointment(req.params.id!);
     if (!appt) throw notFound('Appointment not found.');
-    res.json({ appointment: changeStatus({ auth: req.auth!, appointmentId: appt.id, status: 'no_show', reason: 'Marked no-show' }) });
+    res.json({
+      appointment: await changeStatus({ auth: req.auth!, appointmentId: appt.id, status: 'no_show', reason: 'Marked no-show' }),
+    });
   }),
 );
 
 adminRouter.get(
   '/availability',
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const query = z
       .object({ branchId: z.string(), date: dateSchema, serviceIds: z.string(), staffId: z.string().optional() })
       .parse(req.query);
-    const settings = readSettings(one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId)?.settings);
-    const services = all(
-      `SELECT * FROM services WHERE salonId = ? AND id IN (${query.serviceIds.split(',').map(() => '?').join(',')})`,
+    const settings = readSettings(
+      (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId))?.settings,
+    );
+    const ids = query.serviceIds.split(',');
+    const services = await all(
+      `SELECT * FROM services WHERE salonId = ? AND id IN (${ids.map(() => '?').join(',')})`,
       salonId,
-      ...query.serviceIds.split(','),
+      ...ids,
     );
     const duration = services.reduce((sum, s) => sum + s.durationMinutes, 0);
     res.json(
-      findSlots({
+      await findSlots({
         branchId: query.branchId,
         date: query.date,
         durationMinutes: duration || 30,
@@ -299,18 +314,18 @@ adminRouter.get(
 adminRouter.get(
   '/customers',
   requireCapability(can.viewCustomers, 'Your role cannot browse the customer directory.'),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const query = z.object({ search: z.string().optional(), limit: z.coerce.number().int().max(500).optional() }).parse(req.query);
-    res.json({ customers: listCustomers({ salonId }, query) });
+    res.json({ customers: await listCustomers({ salonId }, query) });
   }),
 );
 
 adminRouter.get(
   '/customers/top',
   requireCapability(can.viewCustomers),
-  handler((req, res) => {
-    const { salonId, branchIds } = scope(req);
+  handler(async (req, res) => {
+    const { salonId, branchIds } = await scope(req);
     const query = z
       .object({
         from: dateSchema.optional(),
@@ -319,34 +334,38 @@ adminRouter.get(
         limit: z.coerce.number().int().max(100).optional(),
       })
       .parse(req.query);
-    res.json({ customers: topCustomers({ salonId, branchIds }, query) });
+    res.json({ customers: await topCustomers({ salonId, branchIds }, query) });
   }),
 );
 
 adminRouter.get(
   '/customers/:id',
   requireCapability(can.viewCustomers),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const id = req.params.id!;
-    const profile = customerProfile(salonId, id);
+    const profile = await customerProfile(salonId, id);
     if (!profile) throw notFound('Customer not found.');
-    const wallet = walletView(salonId, id);
-    const appointments = listAppointments({ salonId, customerId: id, limit: 100 });
-    const transactions = ledger(wallet.id, 100).map(toWalletTransaction);
-    const rewards = all('SELECT * FROM reward_transactions WHERE customerId = ? ORDER BY createdAt DESC', id);
-    const referrals = all('SELECT * FROM referrals WHERE referrerId = ? OR referredCustomerId = ? ORDER BY createdAt DESC', id, id);
-    const notifications = listNotifications(salonId, { limit: 50 }).filter((n) => n.customerId === id);
-    const loyalty = one('SELECT * FROM loyalty_accounts WHERE customerId = ?', id);
-    res.json({ profile, wallet, appointments, transactions, rewards, referrals, notifications, loyalty });
+    const wallet = await walletView(salonId, id);
+    const transactions = (await ledger(wallet.id, 100)).map(toWalletTransaction);
+    res.json({
+      profile,
+      wallet,
+      appointments: await listAppointments({ salonId, customerId: id, limit: 100 }),
+      transactions,
+      rewards: await all('SELECT * FROM reward_transactions WHERE customerId = ? ORDER BY createdAt DESC', id),
+      referrals: await all('SELECT * FROM referrals WHERE referrerId = ? OR referredCustomerId = ? ORDER BY createdAt DESC', id, id),
+      notifications: (await listNotifications(salonId, { limit: 50 })).filter((n) => n.customerId === id),
+      loyalty: await one('SELECT * FROM loyalty_accounts WHERE customerId = ?', id),
+    });
   }),
 );
 
 adminRouter.post(
   '/customers/:id/wallet/adjust',
   requireCapability(can.adjustWallet, 'Only an owner can adjust wallet balances.'),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const body = z
       .object({
         amount: z.number().int(),
@@ -354,8 +373,8 @@ adminRouter.post(
         reason: z.string().min(6).max(300),
       })
       .parse(req.body);
-    const wallet = getOrCreateWallet(salonId, req.params.id!);
-    const entry = adjust({
+    const wallet = await getOrCreateWallet(salonId, req.params.id!);
+    const entry = await adjust({
       walletId: wallet.id,
       customerId: req.params.id!,
       salonId,
@@ -364,18 +383,18 @@ adminRouter.post(
       reason: body.reason,
       actorId: req.auth!.id,
     });
-    audit(req.auth!.id, 'wallet.adjust', 'wallet', wallet.id, { amount: body.amount, balanceType: body.balanceType, reason: body.reason }, req.ip);
-    res.json({ transaction: toWalletTransaction(entry), wallet: walletView(salonId, req.params.id!) });
+    await audit(req.auth!.id, 'wallet.adjust', 'wallet', wallet.id, { amount: body.amount, balanceType: body.balanceType, reason: body.reason }, req.ip);
+    res.json({ transaction: toWalletTransaction(entry), wallet: await walletView(salonId, req.params.id!) });
   }),
 );
 
 adminRouter.post(
   '/customers/:id/consent',
   requireCapability(can.viewCustomers),
-  handler((req, res) => {
+  handler(async (req, res) => {
     const body = z.object({ marketingConsent: z.boolean() }).parse(req.body);
-    run('UPDATE customer_profiles SET marketingConsent = ? WHERE customerId = ?', body.marketingConsent, req.params.id!);
-    audit(req.auth!.id, 'customer.consent', 'user', req.params.id!, body, req.ip);
+    await run('UPDATE customer_profiles SET marketingConsent = ? WHERE customerId = ?', body.marketingConsent, req.params.id!);
+    await audit(req.auth!.id, 'customer.consent', 'user', req.params.id!, body, req.ip);
     res.json({ ok: true });
   }),
 );
@@ -387,8 +406,8 @@ adminRouter.post(
 adminRouter.get(
   '/wallet',
   requireCapability(can.viewReports, 'Your role cannot view the wallet ledger.'),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const query = z
       .object({
         customerId: z.string().optional(),
@@ -414,7 +433,7 @@ adminRouter.get(
     }
     params.push(query.limit ?? 300);
 
-    const rows = all(
+    const rows = await all(
       `SELECT wt.*, u.name AS customerName FROM wallet_transactions wt
          JOIN users u ON u.id = wt.customerId
         WHERE ${clauses.join(' AND ')} ORDER BY wt.createdAt DESC LIMIT ?`,
@@ -422,8 +441,8 @@ adminRouter.get(
     );
     res.json({
       transactions: rows.map((r) => ({ ...toWalletTransaction(r), customerName: r.customerName })),
-      liabilities: liabilities(salonId),
-      recentRecharges: listOrders(salonId, { limit: 20 }).filter((o) => o.purpose === 'wallet_recharge'),
+      liabilities: await liabilities(salonId),
+      recentRecharges: (await listOrders(salonId, { limit: 20 })).filter((o) => o.purpose === 'wallet_recharge'),
     });
   }),
 );
@@ -431,9 +450,9 @@ adminRouter.get(
 adminRouter.get(
   '/wallet.csv',
   requireCapability(can.viewReports),
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const rows = all(
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const rows = await all(
       `SELECT wt.*, u.name AS customerName FROM wallet_transactions wt JOIN users u ON u.id = wt.customerId
         WHERE wt.salonId = ? ORDER BY wt.createdAt DESC LIMIT 5000`,
       salonId,
@@ -448,11 +467,11 @@ adminRouter.get(
 adminRouter.get(
   '/payments',
   requireCapability(can.viewReports, 'Your role cannot view payments.'),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const query = z.object({ status: z.string().optional(), limit: z.coerce.number().int().max(500).optional() }).parse(req.query);
-    const orders = listOrders(salonId, query);
-    const refunds = all(
+    const orders = await listOrders(salonId, query);
+    const refunds = await all(
       `SELECT r.*, u.name AS customerName FROM refunds r JOIN users u ON u.id = r.customerId
         WHERE r.salonId = ? ORDER BY r.createdAt DESC LIMIT 100`,
       salonId,
@@ -474,9 +493,9 @@ adminRouter.get(
 adminRouter.get(
   '/payments.csv',
   requireCapability(can.viewReports),
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const rows = listOrders(salonId, { limit: 5000 });
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const rows = await listOrders(salonId, { limit: 5000 });
     sendCsv(res, 'salonpro-payments.csv', [
       ['created_at', 'customer', 'razorpay_order_id', 'payment_id', 'amount_inr', 'status', 'mode', 'purpose', 'verified_at'],
       ...rows.map((o) => [o.createdAt, o.customerName ?? '', o.razorpayOrderId, o.paymentId ?? '', (o.amount / 100).toFixed(2), o.status, o.mode, o.purpose, o.verifiedAt ?? '']),
@@ -488,7 +507,7 @@ adminRouter.post(
   '/refunds',
   requireCapability(can.processRefund, 'Only an owner or manager can issue a refund.'),
   handler(async (req, res) => {
-    const { salonId } = scope(req);
+    const { salonId } = await scope(req);
     const body = z
       .object({
         paymentOrderId: z.string().optional(),
@@ -499,8 +518,7 @@ adminRouter.post(
         toWallet: z.boolean().default(true),
       })
       .parse(req.body);
-    const result = await refundPayment({ salonId, actorId: req.auth!.id, ...body });
-    res.json(result);
+    res.json(await refundPayment({ salonId, actorId: req.auth!.id, ...body }));
   }),
 );
 
@@ -510,10 +528,12 @@ adminRouter.post(
 
 adminRouter.get(
   '/referrals',
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const stats = salonReferralStats(salonId);
-    const settings = readSettings(one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId)?.settings);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const stats = await salonReferralStats(salonId);
+    const settings = readSettings(
+      (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId))?.settings,
+    );
     res.json({ ...stats, config: settings.referral, mode: 'scripts' });
   }),
 );
@@ -521,8 +541,8 @@ adminRouter.get(
 adminRouter.patch(
   '/referrals/config',
   requireCapability(can.manageReferrals, 'Only an owner can change referral rewards.'),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const body = z
       .object({
         referrerReward: z.number().int().min(0).optional(),
@@ -531,11 +551,11 @@ adminRouter.patch(
         requireFirstPaidVisit: z.boolean().optional(),
       })
       .parse(req.body);
-    const salon = one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId);
+    const salon = await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId);
     const settings = readSettings(salon?.settings);
     const next = { ...settings, referral: { ...settings.referral, ...body } };
-    run('UPDATE salons SET settings = ? WHERE id = ?', JSON.stringify(next), salonId);
-    audit(req.auth!.id, 'referral.config', 'salon', salonId, body, req.ip);
+    await run('UPDATE salons SET settings = ? WHERE id = ?', JSON.stringify(next), salonId);
+    await audit(req.auth!.id, 'referral.config', 'salon', salonId, body, req.ip);
     res.json({ config: next.referral });
   }),
 );
@@ -546,15 +566,17 @@ adminRouter.patch(
 
 adminRouter.get(
   '/reminders',
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const query = z.object({ status: z.string().optional(), stage: z.string().optional() }).parse(req.query);
-    const settings = readSettings(one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId)?.settings);
+    const settings = readSettings(
+      (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId))?.settings,
+    );
     res.json({
-      settings: reminderSettings(salonId),
+      settings: await reminderSettings(salonId),
       templates: settings.templates,
-      notifications: listNotifications(salonId, query),
-      stats: notificationStats(salonId),
+      notifications: await listNotifications(salonId, query),
+      stats: await notificationStats(salonId),
     });
   }),
 );
@@ -562,8 +584,8 @@ adminRouter.get(
 adminRouter.patch(
   '/reminders/settings',
   requireCapability(can.manageSalon, 'Only an owner can change reminder settings.'),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const body = z
       .object({
         stages: z.array(z.enum(['day7', 'day14', 'day30', 'appointment'])).optional(),
@@ -572,8 +594,8 @@ adminRouter.patch(
         enabled: z.boolean().optional(),
       })
       .parse(req.body);
-    const next = saveReminderSettings(salonId, body);
-    audit(req.auth!.id, 'reminder.settings', 'salon', salonId, body, req.ip);
+    const next = await saveReminderSettings(salonId, body);
+    await audit(req.auth!.id, 'reminder.settings', 'salon', salonId, body, req.ip);
     res.json({ settings: next });
   }),
 );
@@ -581,8 +603,8 @@ adminRouter.patch(
 adminRouter.patch(
   '/reminders/templates',
   requireCapability(can.manageSalon, 'Only an owner can edit reminder templates.'),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const body = z
       .object({
         day7: z.string().max(600).optional(),
@@ -593,11 +615,11 @@ adminRouter.patch(
         wallet_credit: z.string().max(600).optional(),
       })
       .parse(req.body);
-    const salon = one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId);
+    const salon = await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId);
     const settings = readSettings(salon?.settings);
     const next = { ...settings, templates: { ...settings.templates, ...body } };
-    run('UPDATE salons SET settings = ? WHERE id = ?', JSON.stringify(next), salonId);
-    audit(req.auth!.id, 'reminder.templates', 'salon', salonId, {}, req.ip);
+    await run('UPDATE salons SET settings = ? WHERE id = ?', JSON.stringify(next), salonId);
+    await audit(req.auth!.id, 'reminder.templates', 'salon', salonId, {}, req.ip);
     res.json({ templates: next.templates });
   }),
 );
@@ -605,19 +627,19 @@ adminRouter.patch(
 adminRouter.post(
   '/reminders/run',
   requireCapability(can.manageSalon, 'Only an owner can trigger a reminder pass.'),
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const result = runReminderPass(salonId);
-    audit(req.auth!.id, 'reminder.run', 'salon', salonId, result as never, req.ip);
-    res.json({ result, notifications: listNotifications(salonId, { limit: 30 }) });
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const result = await runReminderPass(salonId);
+    await audit(req.auth!.id, 'reminder.run', 'salon', salonId, result as never, req.ip);
+    res.json({ result, notifications: await listNotifications(salonId, { limit: 30 }) });
   }),
 );
 
 adminRouter.post(
   '/reminders/:id/retry',
   handler(async (req, res) => {
-    const { salonId } = scope(req);
-    const row = one('SELECT * FROM notifications WHERE id = ? AND salonId = ?', req.params.id!, salonId);
+    const { salonId } = await scope(req);
+    const row = await one('SELECT * FROM notifications WHERE id = ? AND salonId = ?', req.params.id!, salonId);
     if (!row) throw notFound('Notification not found.');
     const updated = await attemptSendAsync(row.id);
     res.json({ notification: updated });
@@ -630,12 +652,14 @@ adminRouter.post(
 
 adminRouter.get(
   '/services',
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const services = all('SELECT * FROM services WHERE salonId = ? ORDER BY sortOrder, name', salonId);
-    const stats = all(
-      `SELECT json_extract(je.value, '$.serviceId') AS serviceId, COUNT(*) AS count, SUM(sr.finalAmount) AS revenue
-         FROM service_records sr, json_each(sr.servicesJson) je WHERE sr.salonId = ? GROUP BY serviceId`,
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const services = await all('SELECT * FROM services WHERE salonId = ? ORDER BY sortOrder, name', salonId);
+    const stats = await all(
+      `SELECT je.value->>'serviceId' AS serviceId, COUNT(*) AS count, SUM(sr.finalAmount) AS revenue
+         FROM service_records sr
+         CROSS JOIN LATERAL jsonb_array_elements(sr.servicesJson::jsonb) AS je(value)
+        WHERE sr.salonId = ? GROUP BY je.value->>'serviceId'`,
       salonId,
     );
     res.json({
@@ -650,29 +674,29 @@ adminRouter.get(
 adminRouter.post(
   '/services',
   requireCapability(can.manageServices),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const body = serviceSchema.parse(req.body);
     const id = crypto.randomUUID();
-    run(
+    await run(
       'INSERT INTO services (id, salonId, name, category, description, price, durationMinutes, active, imageEmoji, sortOrder, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
       id, salonId, body.name, body.category, body.description, body.price, body.durationMinutes,
       body.active ? 1 : 0, body.imageEmoji, body.sortOrder, new Date().toISOString(),
     );
-    audit(req.auth!.id, 'service.create', 'service', id, body as never, req.ip);
-    res.status(201).json({ service: one('SELECT * FROM services WHERE id = ?', id) });
+    await audit(req.auth!.id, 'service.create', 'service', id, body as never, req.ip);
+    res.status(201).json({ service: await one('SELECT * FROM services WHERE id = ?', id) });
   }),
 );
 
 adminRouter.patch(
   '/services/:id',
   requireCapability(can.manageServices),
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const existing = one('SELECT * FROM services WHERE id = ? AND salonId = ?', req.params.id!, salonId);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const existing = await one('SELECT * FROM services WHERE id = ? AND salonId = ?', req.params.id!, salonId);
     if (!existing) throw notFound('Service not found.');
     const body = serviceSchema.partial().parse(req.body);
-    run(
+    await run(
       `UPDATE services SET name = ?, category = ?, description = ?, price = ?, durationMinutes = ?, active = ?, imageEmoji = ?, sortOrder = ? WHERE id = ?`,
       body.name ?? existing.name,
       body.category ?? existing.category,
@@ -684,35 +708,40 @@ adminRouter.patch(
       body.sortOrder ?? existing.sortOrder,
       existing.id,
     );
-    audit(req.auth!.id, 'service.update', 'service', existing.id, body as never, req.ip);
-    res.json({ service: one('SELECT * FROM services WHERE id = ?', existing.id) });
+    await audit(req.auth!.id, 'service.update', 'service', existing.id, body as never, req.ip);
+    res.json({ service: await one('SELECT * FROM services WHERE id = ?', existing.id) });
   }),
 );
 
 adminRouter.get(
   '/staff',
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const staff = all(
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const staffRows = await all(
       `SELECT s.*, u.name, u.phone, u.email, u.status AS userStatus, b.name AS branchName
          FROM staff s JOIN users u ON u.id = s.userId JOIN branches b ON b.id = s.branchId
         WHERE s.salonId = ? ORDER BY b.name, u.name`,
       salonId,
-    ).map((s) => ({
-      ...s,
-      workingHours: parseJson(s.workingHours, fullWeekWorkingHours()),
-      commissionRules: parseJson(s.commissionRules, { serviceBps: 800, productBps: 300 }),
-      breaks: all('SELECT * FROM staff_breaks WHERE staffId = ?', s.id),
-      attendance: all('SELECT * FROM staff_attendance WHERE staffId = ? ORDER BY date DESC LIMIT 14', s.id),
-      stats: {
-        services: scalar<number>('SELECT COUNT(*) FROM service_records WHERE staffId = ?', s.id),
-        revenue: scalar<number>('SELECT COALESCE(SUM(finalAmount),0) FROM service_records WHERE staffId = ?', s.id),
-        upcoming: scalar<number>(
-          "SELECT COUNT(*) FROM appointments WHERE staffId = ? AND date >= date('now') AND status IN ('booked','confirmed')",
-          s.id,
-        ),
-      },
-    }));
+    );
+    const staff = [];
+    for (const s of staffRows) {
+      staff.push({
+        ...s,
+        workingHours: parseJson(s.workingHours, fullWeekWorkingHours()),
+        commissionRules: parseJson(s.commissionRules, { serviceBps: 800, productBps: 300 }),
+        breaks: await all('SELECT * FROM staff_breaks WHERE staffId = ?', s.id),
+        attendance: await all('SELECT * FROM staff_attendance WHERE staffId = ? ORDER BY date DESC LIMIT 14', s.id),
+        stats: {
+          services: await scalar<number>('SELECT COUNT(*) FROM service_records WHERE staffId = ?', s.id),
+          revenue: await scalar<number>('SELECT COALESCE(SUM(finalAmount),0) FROM service_records WHERE staffId = ?', s.id),
+          upcoming: await scalar<number>(
+            "SELECT COUNT(*) FROM appointments WHERE staffId = ? AND date >= ? AND status IN ('booked','confirmed')",
+            s.id,
+            todayIso(),
+          ),
+        },
+      });
+    }
     res.json({ staff });
   }),
 );
@@ -720,31 +749,31 @@ adminRouter.get(
 adminRouter.post(
   '/staff',
   requireCapability(can.manageStaff),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const body = staffSchema.parse(req.body);
     if (!body.userId && (!body.name || !body.phone)) throw badRequest('Provide a name and phone, or an existing user.');
     let userId = body.userId;
     const now = new Date().toISOString();
     if (!userId) {
       const phone = body.phone!.replace(/\D/g, '').slice(-10);
-      const existing = one<{ id: string }>('SELECT id FROM users WHERE phone = ?', phone);
+      const existing = await one<{ id: string }>('SELECT id FROM users WHERE phone = ?', phone);
       if (existing) userId = existing.id;
       else {
         userId = crypto.randomUUID();
-        run('INSERT INTO users (id, name, phone, role, status, isDemo, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?)',
+        await run('INSERT INTO users (id, name, phone, role, status, isDemo, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?)',
           userId, body.name!, phone, 'salon_staff', 'active', 0, now, now);
       }
     }
     const staffId = crypto.randomUUID();
-    run(
+    await run(
       'INSERT INTO staff (id, salonId, branchId, userId, designation, workingHours, commissionRules, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?)',
       staffId, salonId, body.branchId, userId, body.designation,
       JSON.stringify(body.workingHours ?? fullWeekWorkingHours('10:00', '20:00', [0])),
       JSON.stringify(body.commissionRules ?? { serviceBps: 800, productBps: 300 }), 'active', now,
     );
-    run('INSERT INTO user_branches (userId, branchId) VALUES (?,?) ON CONFLICT DO NOTHING', userId, body.branchId);
-    audit(req.auth!.id, 'staff.create', 'staff', staffId, body as never, req.ip);
+    await run('INSERT INTO user_branches (userId, branchId) VALUES (?,?) ON CONFLICT DO NOTHING', userId, body.branchId);
+    await audit(req.auth!.id, 'staff.create', 'staff', staffId, body as never, req.ip);
     res.status(201).json({ staffId });
   }),
 );
@@ -752,12 +781,12 @@ adminRouter.post(
 adminRouter.patch(
   '/staff/:id',
   requireCapability(can.manageStaff),
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const staff = one('SELECT * FROM staff WHERE id = ? AND salonId = ?', req.params.id!, salonId);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const staff = await one('SELECT * FROM staff WHERE id = ? AND salonId = ?', req.params.id!, salonId);
     if (!staff) throw notFound('Staff member not found.');
     const body = staffSchema.partial().parse(req.body);
-    run(
+    await run(
       'UPDATE staff SET designation = ?, workingHours = ?, commissionRules = ?, status = ?, branchId = ? WHERE id = ?',
       body.designation ?? staff.designation,
       JSON.stringify(body.workingHours ?? parseJson(staff.workingHours, {})),
@@ -766,17 +795,17 @@ adminRouter.patch(
       body.branchId ?? staff.branchId,
       staff.id,
     );
-    audit(req.auth!.id, 'staff.update', 'staff', staff.id, body as never, req.ip);
-    res.json({ staff: one('SELECT * FROM staff WHERE id = ?', staff.id) });
+    await audit(req.auth!.id, 'staff.update', 'staff', staff.id, body as never, req.ip);
+    res.json({ staff: await one('SELECT * FROM staff WHERE id = ?', staff.id) });
   }),
 );
 
 adminRouter.post(
   '/staff/:id/attendance',
   requireCapability(can.manageStaff),
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const staff = one<{ id: string; branchId: string }>('SELECT id, branchId FROM staff WHERE id = ? AND salonId = ?', req.params.id!, salonId);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const staff = await one<{ id: string; branchId: string }>('SELECT id, branchId FROM staff WHERE id = ? AND salonId = ?', req.params.id!, salonId);
     if (!staff) throw notFound('Staff member not found.');
     const body = z
       .object({
@@ -786,7 +815,7 @@ adminRouter.post(
         checkOutAt: z.string().nullable().optional(),
       })
       .parse(req.body);
-    run(
+    await run(
       `INSERT INTO staff_attendance (id, staffId, branchId, date, checkInAt, checkOutAt, status) VALUES (?,?,?,?,?,?,?)
        ON CONFLICT(staffId, date) DO UPDATE SET status = excluded.status, checkInAt = excluded.checkInAt, checkOutAt = excluded.checkOutAt`,
       crypto.randomUUID(), staff.id, staff.branchId, body.date, body.checkInAt ?? null, body.checkOutAt ?? null, body.status,
@@ -797,17 +826,21 @@ adminRouter.post(
 
 adminRouter.get(
   '/branches',
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const branches = all('SELECT * FROM branches WHERE salonId = ? ORDER BY name', salonId).map((b) => ({
-      ...b,
-      openingHours: parseJson(b.openingHours, fullWeekHours()),
-      staffCount: scalar<number>('SELECT COUNT(*) FROM staff WHERE branchId = ?', b.id),
-      holidays: all('SELECT * FROM holidays WHERE branchId = ? ORDER BY date', b.id),
-      revenue: scalar<number>('SELECT COALESCE(SUM(finalAmount),0) FROM service_records WHERE branchId = ?', b.id),
-      customers: scalar<number>('SELECT COUNT(DISTINCT customerId) FROM service_records WHERE branchId = ?', b.id),
-      appointments: scalar<number>('SELECT COUNT(*) FROM appointments WHERE branchId = ?', b.id),
-    }));
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const rows = await all('SELECT * FROM branches WHERE salonId = ? ORDER BY name', salonId);
+    const branches = [];
+    for (const b of rows) {
+      branches.push({
+        ...b,
+        openingHours: parseJson(b.openingHours, fullWeekHours()),
+        staffCount: await scalar<number>('SELECT COUNT(*) FROM staff WHERE branchId = ?', b.id),
+        holidays: await all('SELECT * FROM holidays WHERE branchId = ? ORDER BY date', b.id),
+        revenue: await scalar<number>('SELECT COALESCE(SUM(finalAmount),0) FROM service_records WHERE branchId = ?', b.id),
+        customers: await scalar<number>('SELECT COUNT(DISTINCT customerId) FROM service_records WHERE branchId = ?', b.id),
+        appointments: await scalar<number>('SELECT COUNT(*) FROM appointments WHERE branchId = ?', b.id),
+      });
+    }
     res.json({ branches });
   }),
 );
@@ -815,31 +848,31 @@ adminRouter.get(
 adminRouter.post(
   '/branches',
   requireCapability(can.manageBranches),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const body = branchSchema.parse(req.body);
     const id = crypto.randomUUID();
-    tx(() => {
-      run(
+    await tx(async () => {
+      await run(
         'INSERT INTO branches (id, salonId, name, address, contact, timezone, openingHours, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?)',
         id, salonId, body.name, body.address, body.contact, 'Asia/Kolkata', JSON.stringify(body.openingHours), body.status, new Date().toISOString(),
       );
-      run('INSERT INTO user_branches (userId, branchId) VALUES (?,?) ON CONFLICT DO NOTHING', req.auth!.id, id);
-      audit(req.auth!.id, 'branch.create', 'branch', id, body as never, req.ip);
+      await run('INSERT INTO user_branches (userId, branchId) VALUES (?,?) ON CONFLICT DO NOTHING', req.auth!.id, id);
+      await audit(req.auth!.id, 'branch.create', 'branch', id, body as never, req.ip);
     });
-    res.status(201).json({ branch: one('SELECT * FROM branches WHERE id = ?', id) });
+    res.status(201).json({ branch: await one('SELECT * FROM branches WHERE id = ?', id) });
   }),
 );
 
 adminRouter.patch(
   '/branches/:id',
   requireCapability(can.manageBranches),
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const branch = one('SELECT * FROM branches WHERE id = ? AND salonId = ?', req.params.id!, salonId);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const branch = await one('SELECT * FROM branches WHERE id = ? AND salonId = ?', req.params.id!, salonId);
     if (!branch) throw notFound('Branch not found.');
     const body = branchSchema.partial().parse(req.body);
-    run(
+    await run(
       'UPDATE branches SET name = ?, address = ?, contact = ?, openingHours = ?, status = ? WHERE id = ?',
       body.name ?? branch.name,
       body.address ?? branch.address,
@@ -848,20 +881,20 @@ adminRouter.patch(
       body.status ?? branch.status,
       branch.id,
     );
-    audit(req.auth!.id, 'branch.update', 'branch', branch.id, body as never, req.ip);
-    res.json({ branch: one('SELECT * FROM branches WHERE id = ?', branch.id) });
+    await audit(req.auth!.id, 'branch.update', 'branch', branch.id, body as never, req.ip);
+    res.json({ branch: await one('SELECT * FROM branches WHERE id = ?', branch.id) });
   }),
 );
 
 adminRouter.post(
   '/branches/:id/holidays',
   requireCapability(can.manageBranches),
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const branch = one('SELECT id FROM branches WHERE id = ? AND salonId = ?', req.params.id!, salonId);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const branch = await one('SELECT id FROM branches WHERE id = ? AND salonId = ?', req.params.id!, salonId);
     if (!branch) throw notFound('Branch not found.');
     const body = z.object({ date: dateSchema, reason: z.string().max(120).optional() }).parse(req.body);
-    run('INSERT INTO holidays (id, branchId, date, reason) VALUES (?,?,?,?) ON CONFLICT(branchId, date) DO UPDATE SET reason = excluded.reason',
+    await run('INSERT INTO holidays (id, branchId, date, reason) VALUES (?,?,?,?) ON CONFLICT(branchId, date) DO UPDATE SET reason = excluded.reason',
       crypto.randomUUID(), branch.id, body.date, body.reason ?? null);
     res.json({ ok: true });
   }),
@@ -869,13 +902,13 @@ adminRouter.post(
 
 adminRouter.get(
   '/offers',
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     res.json({
-      rechargeOffers: all('SELECT * FROM recharge_offers WHERE salonId = ? ORDER BY sortOrder', salonId).map((o) => ({
+      rechargeOffers: (await all('SELECT * FROM recharge_offers WHERE salonId = ? ORDER BY sortOrder', salonId)).map((o) => ({
         ...o, active: !!o.active, totalValue: o.payAmount + o.bonusAmount,
       })),
-      coupons: all('SELECT * FROM coupons WHERE salonId = ? ORDER BY endAt DESC', salonId).map(toCoupon),
+      coupons: (await all('SELECT * FROM coupons WHERE salonId = ? ORDER BY endAt DESC', salonId)).map(toCoupon),
     });
   }),
 );
@@ -883,61 +916,61 @@ adminRouter.get(
 adminRouter.post(
   '/offers/recharge',
   requireCapability(can.manageSalon),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const body = rechargeOfferSchema.parse(req.body);
     const id = crypto.randomUUID();
-    run('INSERT INTO recharge_offers (id, salonId, payAmount, bonusAmount, label, active, sortOrder) VALUES (?,?,?,?,?,?,?)',
+    await run('INSERT INTO recharge_offers (id, salonId, payAmount, bonusAmount, label, active, sortOrder) VALUES (?,?,?,?,?,?,?)',
       id, salonId, body.payAmount, body.bonusAmount, body.label, body.active ? 1 : 0, body.sortOrder);
-    audit(req.auth!.id, 'offer.create', 'recharge_offer', id, body as never, req.ip);
-    res.status(201).json({ offer: one('SELECT * FROM recharge_offers WHERE id = ?', id)! });
+    await audit(req.auth!.id, 'offer.create', 'recharge_offer', id, body as never, req.ip);
+    res.status(201).json({ offer: (await one('SELECT * FROM recharge_offers WHERE id = ?', id))! });
   }),
 );
 
 adminRouter.patch(
   '/offers/recharge/:id',
   requireCapability(can.manageSalon),
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const offer = one('SELECT * FROM recharge_offers WHERE id = ? AND salonId = ?', req.params.id!, salonId);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const offer = await one('SELECT * FROM recharge_offers WHERE id = ? AND salonId = ?', req.params.id!, salonId);
     if (!offer) throw notFound('Offer not found.');
     const body = rechargeOfferSchema.partial().parse(req.body);
-    run('UPDATE recharge_offers SET payAmount = ?, bonusAmount = ?, label = ?, active = ?, sortOrder = ? WHERE id = ?',
+    await run('UPDATE recharge_offers SET payAmount = ?, bonusAmount = ?, label = ?, active = ?, sortOrder = ? WHERE id = ?',
       body.payAmount ?? offer.payAmount, body.bonusAmount ?? offer.bonusAmount,
       body.label ?? offer.label, (body.active ?? !!offer.active) ? 1 : 0, body.sortOrder ?? offer.sortOrder, offer.id);
-    audit(req.auth!.id, 'offer.update', 'recharge_offer', offer.id, body as never, req.ip);
-    res.json({ offer: one('SELECT * FROM recharge_offers WHERE id = ?', offer.id)! });
+    await audit(req.auth!.id, 'offer.update', 'recharge_offer', offer.id, body as never, req.ip);
+    res.json({ offer: (await one('SELECT * FROM recharge_offers WHERE id = ?', offer.id))! });
   }),
 );
 
 adminRouter.post(
   '/coupons',
   requireCapability(can.manageSalon),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const body = couponSchema.parse(req.body);
-    if (one('SELECT id FROM coupons WHERE UPPER(code) = UPPER(?)', body.code)) throw conflict('That coupon code already exists.');
+    if (await one('SELECT id FROM coupons WHERE UPPER(code) = UPPER(?)', body.code)) throw conflict('That coupon code already exists.');
     const id = crypto.randomUUID();
-    run('INSERT INTO coupons (id, salonId, code, type, value, minAmount, maxDiscount, startAt, endAt, usageLimit, usedCount, active, description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    await run('INSERT INTO coupons (id, salonId, code, type, value, minAmount, maxDiscount, startAt, endAt, usageLimit, usedCount, active, description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
       id, salonId, body.code.toUpperCase(), body.type, body.value, body.minAmount, body.maxDiscount, body.startAt, body.endAt, body.usageLimit, 0, body.active ? 1 : 0, body.description);
-    audit(req.auth!.id, 'coupon.create', 'coupon', id, body as never, req.ip);
-    res.status(201).json({ coupon: toCoupon(one('SELECT * FROM coupons WHERE id = ?', id)!) });
+    await audit(req.auth!.id, 'coupon.create', 'coupon', id, body as never, req.ip);
+    res.status(201).json({ coupon: toCoupon((await one('SELECT * FROM coupons WHERE id = ?', id))!) });
   }),
 );
 
 adminRouter.patch(
   '/coupons/:id',
   requireCapability(can.manageSalon),
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const coupon = one('SELECT * FROM coupons WHERE id = ? AND salonId = ?', req.params.id!, salonId);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const coupon = await one('SELECT * FROM coupons WHERE id = ? AND salonId = ?', req.params.id!, salonId);
     if (!coupon) throw notFound('Coupon not found.');
     const body = couponSchema.partial().parse(req.body);
-    run('UPDATE coupons SET code = ?, type = ?, value = ?, minAmount = ?, maxDiscount = ?, endAt = ?, usageLimit = ?, active = ?, description = ? WHERE id = ?',
+    await run('UPDATE coupons SET code = ?, type = ?, value = ?, minAmount = ?, maxDiscount = ?, endAt = ?, usageLimit = ?, active = ?, description = ? WHERE id = ?',
       (body.code ?? coupon.code).toUpperCase(), body.type ?? coupon.type, body.value ?? coupon.value,
       body.minAmount ?? coupon.minAmount, body.maxDiscount ?? coupon.maxDiscount, body.endAt ?? coupon.endAt,
       body.usageLimit ?? coupon.usageLimit, (body.active ?? !!coupon.active) ? 1 : 0, body.description ?? coupon.description, coupon.id);
-    res.json({ coupon: toCoupon(one('SELECT * FROM coupons WHERE id = ?', coupon.id)!) });
+    res.json({ coupon: toCoupon((await one('SELECT * FROM coupons WHERE id = ?', coupon.id))!) });
   }),
 );
 
@@ -948,20 +981,20 @@ adminRouter.patch(
 adminRouter.get(
   '/reports/revenue',
   requireCapability(can.viewReports, 'Your role cannot view financial reports.'),
-  handler((req, res) => {
-    const { salonId, branchIds } = scope(req);
+  handler(async (req, res) => {
+    const { salonId, branchIds } = await scope(req);
     const query = z.object({ from: dateSchema, to: dateSchema }).parse(req.query);
-    res.json({ report: revenueReport({ salonId, branchIds }, query.from, query.to) });
+    res.json({ report: await revenueReport({ salonId, branchIds }, query.from, query.to) });
   }),
 );
 
 adminRouter.get(
   '/reports/revenue.csv',
   requireCapability(can.viewReports),
-  handler((req, res) => {
-    const { salonId, branchIds } = scope(req);
+  handler(async (req, res) => {
+    const { salonId, branchIds } = await scope(req);
     const query = z.object({ from: dateSchema, to: dateSchema }).parse(req.query);
-    const report = revenueReport({ salonId, branchIds }, query.from, query.to);
+    const report = await revenueReport({ salonId, branchIds }, query.from, query.to);
     sendCsv(res, `salonpro-revenue-${query.from}-to-${query.to}.csv`, [
       ['SalonPro revenue report', `${query.from} to ${query.to}`],
       [],
@@ -991,18 +1024,18 @@ adminRouter.get(
 adminRouter.get(
   '/reports/retention',
   requireCapability(can.viewReports),
-  handler((req, res) => {
-    const { salonId, branchIds } = scope(req);
-    res.json({ report: retentionReport({ salonId, branchIds }) });
+  handler(async (req, res) => {
+    const { salonId, branchIds } = await scope(req);
+    res.json({ report: await retentionReport({ salonId, branchIds }) });
   }),
 );
 
 adminRouter.get(
   '/reports/customers.csv',
   requireCapability(can.viewReports),
-  handler((req, res) => {
-    const { salonId, branchIds } = scope(req);
-    const rows = topCustomers({ salonId, branchIds }, { limit: 5000 });
+  handler(async (req, res) => {
+    const { salonId, branchIds } = await scope(req);
+    const rows = await topCustomers({ salonId, branchIds }, { limit: 5000 });
     sendCsv(res, 'salonpro-customers.csv', [
       ['name', 'phone_masked', 'visits', 'total_spend_inr', 'average_spend_inr', 'last_visit', 'wallet_balance_inr', 'successful_referrals'],
       ...rows.map((c) => [c.name, c.phoneMasked, c.visits, (c.totalSpend / 100).toFixed(2), (c.averageSpend / 100).toFixed(2), c.lastVisitAt ?? '', (c.walletBalance / 100).toFixed(2), c.referrals]),
@@ -1013,16 +1046,17 @@ adminRouter.get(
 adminRouter.get(
   '/users',
   requireCapability(can.manageSettings, 'Only an owner can manage roles.'),
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const users = all(
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const users = await all(
       `SELECT u.id, u.name, u.phone, u.email, u.role, u.status, u.createdAt,
-              (SELECT GROUP_CONCAT(b.name) FROM user_branches ub JOIN branches b ON b.id = ub.branchId WHERE ub.userId = u.id) AS branchNames,
-              (SELECT COUNT(*) FROM sessions s WHERE s.userId = u.id AND s.revokedAt IS NULL AND s.expiresAt > datetime('now')) AS activeSessions
+              (SELECT string_agg(b.name, ',') FROM user_branches ub JOIN branches b ON b.id = ub.branchId WHERE ub.userId = u.id) AS branchNames,
+              (SELECT COUNT(*) FROM sessions s WHERE s.userId = u.id AND s.revokedAt IS NULL AND s.expiresAt > ?) AS activeSessions
          FROM users u
         WHERE u.role <> 'customer'
            OR EXISTS (SELECT 1 FROM referrals r WHERE r.salonId = ? AND (r.referrerId = u.id OR r.referredCustomerId = u.id))
         ORDER BY u.role, u.name`,
+      new Date().toISOString(),
       salonId,
     );
     res.json({ users });
@@ -1032,27 +1066,27 @@ adminRouter.get(
 adminRouter.patch(
   '/users/:id',
   requireCapability(can.manageSettings, 'Only an owner can change roles.'),
-  handler((req, res) => {
+  handler(async (req, res) => {
     const body = userUpdateSchema.parse(req.body);
-    const user = one<{ id: string; role: string }>('SELECT id, role FROM users WHERE id = ?', req.params.id!);
+    const user = await one<{ id: string; role: string }>('SELECT id, role FROM users WHERE id = ?', req.params.id!);
     if (!user) throw notFound('User not found.');
     if (user.id === req.auth!.id && body.role && body.role !== user.role) throw badRequest('You cannot change your own role.');
-    if (body.role) run('UPDATE users SET role = ?, updatedAt = ? WHERE id = ?', body.role, new Date().toISOString(), user.id);
-    if (body.name) run('UPDATE users SET name = ?, updatedAt = ? WHERE id = ?', body.name, new Date().toISOString(), user.id);
-    if (body.email !== undefined) run('UPDATE users SET email = ?, updatedAt = ? WHERE id = ?', body.email, new Date().toISOString(), user.id);
+    if (body.role) await run('UPDATE users SET role = ?, updatedAt = ? WHERE id = ?', body.role, new Date().toISOString(), user.id);
+    if (body.name) await run('UPDATE users SET name = ?, updatedAt = ? WHERE id = ?', body.name, new Date().toISOString(), user.id);
+    if (body.email !== undefined) await run('UPDATE users SET email = ?, updatedAt = ? WHERE id = ?', body.email, new Date().toISOString(), user.id);
     if (body.status) {
-      run('UPDATE users SET status = ?, updatedAt = ? WHERE id = ?', body.status, new Date().toISOString(), user.id);
-      if (body.status === 'deactivated') run('UPDATE sessions SET revokedAt = ? WHERE userId = ? AND revokedAt IS NULL', new Date().toISOString(), user.id);
+      await run('UPDATE users SET status = ?, updatedAt = ? WHERE id = ?', body.status, new Date().toISOString(), user.id);
+      if (body.status === 'deactivated') await run('UPDATE sessions SET revokedAt = ? WHERE userId = ? AND revokedAt IS NULL', new Date().toISOString(), user.id);
     }
-    audit(req.auth!.id, 'user.update', 'user', user.id, body as never, req.ip);
-    res.json({ user: one('SELECT id, name, phone, email, role, status FROM users WHERE id = ?', user.id) });
+    await audit(req.auth!.id, 'user.update', 'user', user.id, body as never, req.ip);
+    res.json({ user: await one('SELECT id, name, phone, email, role, status FROM users WHERE id = ?', user.id) });
   }),
 );
 
 adminRouter.get(
   '/audit',
   requireCapability(can.viewAudit, 'Only an owner can read the audit log.'),
-  handler((req, res) => {
+  handler(async (req, res) => {
     const query = z
       .object({ limit: z.coerce.number().int().max(500).optional(), entityType: z.string().optional(), action: z.string().optional() })
       .parse(req.query);
@@ -1067,10 +1101,12 @@ adminRouter.get(
       params.push(`%${query.action}%`);
     }
     params.push(query.limit ?? 200);
-    const logs = all(
-      `SELECT al.*, u.name AS actorName FROM audit_logs al LEFT JOIN users u ON u.id = al.actorId
-        WHERE ${clauses.join(' AND ')} ORDER BY al.timestamp DESC LIMIT ?`,
-      ...params,
+    const logs = (
+      await all(
+        `SELECT al.*, u.name AS actorName FROM audit_logs al LEFT JOIN users u ON u.id = al.actorId
+          WHERE ${clauses.join(' AND ')} ORDER BY al."timestamp" DESC LIMIT ?`,
+        ...params,
+      )
     ).map((l) => ({ ...l, meta: parseJson(l.meta, null) }));
     res.json({ logs });
   }),
@@ -1078,12 +1114,11 @@ adminRouter.get(
 
 adminRouter.get(
   '/settings',
-  handler((req, res) => {
-    const { salonId } = scope(req);
-    const salon = one('SELECT * FROM salons WHERE id = ?', salonId);
-    const settings = readSettings(salon?.settings);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const salon = await one('SELECT * FROM salons WHERE id = ?', salonId);
     res.json({
-      salon: { ...salon, settings },
+      salon: { ...salon, settings: readSettings(salon?.settings) },
       integrations,
       payments: { mode: PAYMENT_MODE },
       refundPolicy:
@@ -1095,8 +1130,8 @@ adminRouter.get(
 adminRouter.patch(
   '/settings',
   requireCapability(can.manageSalon, 'Only an owner can change salon settings.'),
-  handler((req, res) => {
-    const { salonId } = scope(req);
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
     const body = z
       .object({
         name: z.string().min(2).max(80).optional(),
@@ -1109,12 +1144,12 @@ adminRouter.patch(
         loyaltyPointsPerHundred: z.number().int().min(0).max(100).optional(),
       })
       .parse(req.body);
-    const salon = one<{ settings: string; name: string; address: string; contact: string | null }>(
+    const salon = await one<{ settings: string; name: string; address: string; contact: string | null }>(
       'SELECT settings, name, address, contact FROM salons WHERE id = ?',
       salonId,
     );
     const settings = { ...readSettings(salon?.settings), ...body };
-    run(
+    await run(
       'UPDATE salons SET name = ?, address = ?, contact = ?, settings = ? WHERE id = ?',
       body.name ?? salon!.name,
       body.address ?? salon!.address,
@@ -1122,20 +1157,23 @@ adminRouter.patch(
       JSON.stringify(settings),
       salonId,
     );
-    audit(req.auth!.id, 'salon.settings', 'salon', salonId, body as never, req.ip);
+    await audit(req.auth!.id, 'salon.settings', 'salon', salonId, body as never, req.ip);
     res.json({ settings });
   }),
 );
 
 adminRouter.get(
   '/me',
-  handler((req, res) => {
-    const { salonId, branchIds } = scope(req);
-    const salon = one('SELECT * FROM salons WHERE id = ?', salonId);
+  handler(async (req, res) => {
+    const { salonId, branchIds } = await scope(req);
+    const salon = await one('SELECT * FROM salons WHERE id = ?', salonId);
     res.json({
       user: req.auth,
       salon: { ...salon, settings: readSettings(salon?.settings) },
-      branches: all('SELECT id, name, status FROM branches WHERE id IN (' + (branchIds.length ? branchIds.map(() => '?').join(',') : "''") + ')', ...branchIds),
+      branches: await all(
+        'SELECT id, name, status FROM branches WHERE id IN (' + (branchIds.length ? branchIds.map(() => '?').join(',') : "''") + ')',
+        ...branchIds,
+      ),
       capabilities: Object.fromEntries(Object.entries(can).map(([k, fn]) => [k, fn(req.auth!.role)])),
     });
   }),

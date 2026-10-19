@@ -19,12 +19,35 @@ navigation — installable as a PWA and shipped as two Android apps.
 | Web | Vite + React 18 + TypeScript + Tailwind + React Router + TanStack Query | Fast dev loop, no Expo/Metro |
 | PWA | `vite-plugin-pwa` (Workbox) | Installable, offline shell |
 | API | Express 4 + TypeScript (`tsx`) | Small, inspectable |
-| DB | `node:sqlite` (`DatabaseSync`), WAL | Zero external deps; synchronous writes make check-then-insert atomic without a lock service |
+| DB | **Postgres** — Neon (`pg`) in production, **PGlite** (Postgres in WASM) locally and in tests | One SQL dialect everywhere; the test suite needs no database server |
 | Validation | `zod` | One schema per boundary |
 | Scheduling | `node-cron` | Reminder passes |
 
 Money is stored as **integer paise** everywhere. The wallet is an **append-only
-ledger**; balances are always derived from the sum of posted rows.
+ledger**; balances are always derived from the sum of posted rows — the
+`wallets` table has no balance column at all.
+
+### One database, two drivers
+
+`apps/api/src/db.ts` owns the connection. It picks the driver from
+`DATABASE_URL`:
+
+| `DATABASE_URL` | Driver | Used for |
+|---|---|---|
+| `postgresql://…` | `pg` `Pool` against Neon | production / staging |
+| `pglite:memory:` | PGlite, in-memory | the test suite |
+| `pglite:file:<dir>` | PGlite, file-backed | local dev without a server |
+
+The rest of the codebase keeps writing SQLite-flavoured SQL (`?` placeholders,
+camelCase columns). `toPg()` translates it at the driver boundary — `?` → `$n`,
+and camelCase / `timestamp` identifiers are quoted so Postgres preserves their
+case. `one/all/run/scalar/tx` are async; `tx()` opens a real transaction, joins
+the caller's transaction when nested, and uses `AsyncLocalStorage` so every
+statement inside a request runs on the transaction's own connection.
+
+`migrate()` runs the (idempotent) schema statement by statement and is called on
+boot, so a fresh Neon database becomes usable on the first `npm start`.
+
 
 ---
 
@@ -72,17 +95,26 @@ The rest of the kit is there to reach for.
 > `prefers-reduced-motion`, jsdom). A number can therefore never be stranded
 > showing `0`, and content can never be stranded invisible.
 
+> Motion also respects the phone's own setting: `MotionConfig reducedMotion="user"`
+> in `App.tsx` plus a CSS media query means a device with "reduce motion" on gets
+> no sliding pills, meteors or ticking numbers. And every screen is wrapped in an
+> `ErrorBoundary`, so a crash shows a readable card with a reload button instead
+> of a blank white screen.
+
 ---
 
 ## Quick start
 
 ```bash
 npm install
-npm run seed -- --reset     # create + populate the demo database
+npm run seed:reset          # create + populate the demo database
 npm run dev                 # API on :4000, web on :5173
 ```
 
 Then open <http://localhost:5173>.
+
+With no `DATABASE_URL` the API uses a file-backed PGlite database under
+`data/`, so this works with **no database server installed**.
 
 Single-process production mode (API serves the built SPA):
 
@@ -101,18 +133,83 @@ bash scripts/serve.sh       # frees :4000, prints the phone URL, then starts
 
 ---
 
+## Neon database
+
+Put the connection string in `.env` **in quotes** — an unquoted URL loses
+everything after the first `&`, because the shell splits it:
+
+```bash
+DATABASE_URL='postgresql://user:password@ep-xxxx-pooler.region.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+```
+
+```bash
+npm start        # creates the schema on boot if it is missing, then serves
+```
+
+`npm start` calls `migrate()`, so pointing the app at an empty Neon database and
+starting it is all the setup there is. Verify with the health endpoint:
+
+```bash
+curl -s localhost:4000/api/health      # → { ok, integrations: {…}, database: "postgres" }
+```
+
+> **Demo data vs. a live salon.** `npm run seed:reset` is for local demos only:
+> it **drops every table** and fills the database with sample customers,
+> appointments and payments. Never run it against a real salon's database.
+> For a real one use the bootstrap below, which creates a clean salon and
+> nothing else.
+
+### Bootstrapping a live salon (no demo data)
+
+Creates one salon, one owner, one branch and the three standard recharge offers
+(₹500→₹550, ₹1000→₹1150, ₹2000→₹2400) — **no customers, appointments, wallets or
+payments**:
+
+```bash
+BOOTSTRAP_OWNER_PHONE=9812345678 \
+BOOTSTRAP_OWNER_NAME="Deepa Menon" \
+BOOTSTRAP_SALON_NAME="Blush Studio" \
+BOOTSTRAP_ADDRESS="12 MG Road, Bengaluru" \
+npm run seed:bootstrap
+```
+
+| Variable | Required | Default |
+|---|---|---|
+| `BOOTSTRAP_OWNER_PHONE` | yes | — (the mobile number the owner signs in with) |
+| `BOOTSTRAP_OWNER_NAME` | no | `Salon Owner` |
+| `BOOTSTRAP_SALON_NAME` | no | `SalonPro` |
+| `BOOTSTRAP_ADDRESS` | no | `Address not set — update it in Settings` |
+| `BOOTSTRAP_CONTACT` | no | — |
+| `BOOTSTRAP_BRANCH` | no | `<salon name> — Main branch` |
+
+Environment variables are the supported route because `npm run` swallows
+unknown `--flags`. To pass flags instead, call the CLI directly:
+
+```bash
+cd apps/api && npx tsx src/seed.ts --bootstrap --phone 9812345678 --owner "Deepa Menon" --salon "Blush Studio"
+```
+
+Running it twice is safe: if a salon already exists it does nothing. The owner
+then signs in with OTP from the admin app and adds services, staff and branches.
+
+---
+
 ## Scripts
 
 | Command | What it does |
 |---|---|
 | `npm run dev` | Runs API + web together |
-| `npm run seed -- --reset` | Drops and reseeds demo data |
+| `npm run seed` | Seeds the demo data into an **empty** database |
+| `npm run seed:reset` | Drops everything and reseeds the demo data (local only) |
+| `npm run seed:bootstrap` | Creates a clean live salon — no demo data. See [Neon database](#neon-database) |
 | `npm run build` | Typechecks and builds the customer SPA + PWA (`apps/web/dist`) |
 | `npm run build:admin` | Builds the dashboard-only bundle (`apps/web/dist-admin`, `VITE_APP_MODE=admin`) |
-| `npm start` | Runs the API (serves `apps/web/dist` if built) |
+| `npm start` | Runs the API (migrates the database, serves `apps/web/dist` if built) |
 | `bash scripts/serve.sh` | Kills a stale API on `:4000`, then starts a fresh one |
 | `npm run typecheck` | TypeScript for API + web (tests included) |
 | `npm test` | Full test suite: shared + API + web |
+| `npm run test:api` | API suite (database, routes, journeys, integrations) |
+| `npm run test:smoke` | Just the end-to-end journeys |
 
 ## Android apps (two icons, one codebase)
 
@@ -128,7 +225,7 @@ Build and install over USB (phone on the same Wi-Fi as this PC, USB debugging on
 
 ```bash
 # both apps, seed the DB, and install over USB — one shot
-npm install && npm run seed -- --reset && bash scripts/build-apk.sh customer && bash scripts/build-apk.sh admin
+npm install && npm run seed:reset && bash scripts/build-apk.sh customer && bash scripts/build-apk.sh admin
 ```
 
 Or one at a time:
@@ -160,7 +257,10 @@ The packaged APKs are a real native shell, not a browser tab:
   the marketing landing page only renders on the open web. The admin APK is
   dashboard-only.
 - **Android hardware back button** pops the in-app history, and only exits after
-  a second press ("press back again to exit") — handled in `lib/native.ts`.
+  a second press ("press back again to exit") — handled in `lib/native.ts`. It
+  trusts Capacitor's own `canGoBack`, never `window.history.length`, because a
+  popped history entry leaves that count unchanged and would leave the button
+  doing nothing.
 - **Native splash screen** is held until React has mounted, over a blush
   background, so there is no white flash on launch. Status bar is themed to
   match, and content no longer renders underneath it.
@@ -192,45 +292,47 @@ refused when `NODE_ENV=production`.
 
 ## Testing
 
-The suite runs on Node's built-in test runner (API/shared) and Vitest (web). No
-network or external services are needed: the API harness boots the real Express
-app on an ephemeral port against a throwaway SQLite file, seeded deterministically.
+The suite runs on Node's built-in test runner (API/shared) and Vitest (web).
+**No database server, network or external service is needed:** the API harness
+boots the real Express app on an ephemeral port against PGlite — real Postgres
+compiled to WebAssembly — seeded deterministically.
 
 ```bash
-npm test              # everything (122 tests)
+npm test              # everything (208 tests)
 npm run test:shared   # pure helpers: money, time, masking (9)
-npm run test:api      # integration: auth, booking, wallet, payments, referrals, RBAC, validation, analytics (72)
-npm run test:web      # UI: api client, design system, full-app render smoke (41)
+npm run test:api      # database, routes, journeys, integrations (119)
+npm run test:web      # mobile UX, pages, crash safety, primitives (80)
+npm run test:smoke    # just the end-to-end journeys (10)
 ```
 
 What the suites cover:
 
-- **Shared (9)** — paise formatting, rupee round-tripping, phone masking, time
-  conversion, date math, status labels.
-- **API (72)** — OTP flow and its honesty; session tokens stored hashed; booking
-  availability, idempotency, overlap → 409, the appointment state machine, the
-  service record; wallet recharge/replay, **bonus-before-cash** spending,
-  insufficient-balance → 409, append-only invariant, adjustment audit; payment
-  order creation, **real signature verification**, tampered-signature rejection,
-  signed webhook crediting once and ignoring replays; referral attribution,
-  self-referral and first-touch guards, ₹50+₹50 once, refund reversal; RBAC and
-  branch scoping; validation and error-shape semantics; analytics and Top-20.
-- **Web (41)** — the API client's token/401/error-shape behaviour and file
-  download; every design-system primitive; and full-app render smoke tests for
-  public routes, the customer shell, the admin shell, and the route guards.
+| Suite | Tests | What it pins down |
+|---|---|---|
+| **shared** | 9 | Paise formatting, rupee round-tripping, phone masking, time conversion, date math, status labels |
+| **`db.test.ts`** | 22 | `toPg()` translation (placeholders, camelCase quoting, literals and comments untouched); `scalar`/`COUNT` return numbers, not bigint strings; `tx()` commits, rolls back, flattens nested calls and never wedges the driver; `migrate()` is idempotent; **the ledger has no `UPDATE`/`DELETE` path in the source** |
+| **`routes.test.ts`** | 6 | **All 98 HTTP routes** exist and answer without a 5xx; every protected route 401s anonymously; a customer token gets 403 on every admin route; the 34 endpoints the apps load daily return 200; CSV exports are real files |
+| **`smoke.test.ts`** | 10 | Whole journeys over HTTP: OTP sign-up → recharge → book from the wallet → receipt; cancel refunds and frees the slot; data export + account deletion; a completed visit reaching the dashboard, ledger, leaderboard, revenue report and audit log; the ₹50+₹50 referral paying out after qualification; then SQL invariants (no orphans, no overdrawn wallet, no half-written ledger row) |
+| **`integrations.test.ts`** | 8 | **Honesty:** the dev OTP mock labels itself and says "no real SMS was sent"; production **refuses with 503** rather than faking an OTP; notifications are never marked `sent` without a provider; opt-outs are `suppressed`; registering a push device creates no phantom delivery; `/api/health` reports every integration as `false` while unconfigured; **the production bootstrap creates a clean database** (1 user, 1 salon, 1 branch, 3 offers, zero of anything else) and its owner can sign in |
+| **existing API suites** | 73 | Auth/sessions, booking and the status machine, wallet maths and bonus-before-cash, payments and signature verification, referrals, RBAC and branch scoping, validation and error shapes, analytics |
+| **`mobile-ux.test.tsx`** | 21 | The mobile-app contracts: `viewport-fit=cover`, safe-area padding, `.card { min-width: 0 }`, **no `overflow-x: hidden` anywhere**, `overscroll-behavior`/tap-highlight off, `prefers-reduced-motion` (CSS + `MotionConfig`), the dock's items are siblings of one flex row with identical geometry, and the Android back button (back inside the app, double-press to exit, forgotten after 2 s) |
+| **`pages.test.tsx`** | 12 | Renders the real pages against a mocked API **twice with different payloads**, so a hardcoded number or a fabricated chart fails; error and empty states; premium-customer leaderboard order and phone masking |
+| **`crash-safety.test.tsx`** | 6 | The error boundary turns a thrown render error into a readable card with a reload button; `NumberTicker` renders `0` for a missing metric instead of blanking the screen |
+| **existing web tests** | 41 | API client token/401/error shapes and downloads, every design-system primitive, full-app render smoke and route guards |
 
 ### Test architecture
 
-- `apps/api/test/setup-env.ts` sets a throwaway `DATABASE_FILE` and generous rate
-  limits. It must be the **first import** so env is set before any `src` module
-  loads.
+- `apps/api/test/setup-env.ts` sets `NODE_ENV=test`, `DATABASE_URL=pglite:memory:`
+  and generous rate limits. It must be the **first import** so env is in place
+  before any `src` module loads.
 - `apps/api/test/harness.ts` exports `getHarness()`: it resets + reseeds, builds
   the app, listens on port `0`, and returns typed `get/post/patch/request/login`
-  helpers plus direct `db` access. `index.ts` was split into `app.ts`
-  (`buildApp()`, side-effect free) so tests can mount it without a listener or a
+  helpers plus direct `db` access. `index.ts` is split into `app.ts`
+  (`buildApp()`, side-effect free) so tests mount it without a listener or a
   scheduler.
 - `apps/web/test/setup.ts` wires `@testing-library/jest-dom`, cleans up between
-  tests, and shims `matchMedia`/`scrollTo` for jsdom.
+  tests, and shims `matchMedia`, `scrollTo` and `ResizeObserver` (recharts needs
+  the last one to size a chart in jsdom) for jsdom.
 
 `apps/api/src/**` is fully typechecked together with tests, so `npm run typecheck`
 fails on a broken test as well as broken app code.
@@ -244,10 +346,10 @@ Copy `.env.example` to `.env` (loaded by a tiny built-in parser — no `dotenv`)
 | Variable | Default | Effect |
 |---|---|---|
 | `PORT` | `4000` | API port |
-| `DATABASE_FILE` | `data/salonpro.db` | SQLite file (tests override this) |
+| `DATABASE_URL` | `pglite:file:data/pglite` | Postgres connection. `postgresql://…` → Neon via `pg`; `pglite:memory:` / `pglite:file:<dir>` → local Postgres-in-WASM. **Quote it in `.env`** — the URL contains `&`. |
 | `SESSION_SECRET` | dev value | Key for hashed session tokens; rotate to sign everyone out |
 | `SESSION_TTL_DAYS` | `30` | Session lifetime |
-| `OTP_PROVIDER_CONFIGURED` | `false` | If false, OTP is a labelled dev mock |
+| `OTP_PROVIDER_CONFIGURED` | `false` | If false, OTP is a labelled dev mock (and in `NODE_ENV=production` the request is **refused with 503** instead of faked) |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | empty | When set, live-ish mode; otherwise **simulated** |
 | `RAZORPAY_WEBHOOK_SECRET` | empty | Webhook HMAC secret (falls back to a dev secret) |
 | `ALLOW_PAYMENT_SIMULATION` | `true` | Lets the built-in test checkout post signed payloads |
@@ -255,7 +357,12 @@ Copy `.env.example` to `.env` (loaded by a tiny built-in parser — no `dotenv`)
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | empty | Web push |
 | `WEB_ORIGIN` | `http://localhost:5173` | CORS allow-list |
 | `SERVE_STATIC` | `true` | Serve the built SPA from the API |
-| `NODE_ENV` | `development` | `production` disables demo login + excludes demo data |
+| `NODE_ENV` | `development` | `production` disables demo login, refuses to fake an OTP and excludes demo data |
+
+> Treat a production `DATABASE_URL` like a password: it grants full access to
+> the salon's data. Rotate the Neon role's password if it has ever been shared
+> in chat, a screenshot or a ticket, and set a real `SESSION_SECRET` — the
+> default value is public.
 
 ---
 
@@ -272,20 +379,24 @@ Copy `.env.example` to `.env` (loaded by a tiny built-in parser — no `dotenv`)
   so the security-critical path is exercised, not stubbed. Simulated orders are
   labelled and excluded from production reporting.
 - **OTP** — without a provider, the code is returned in the response and the UI
-  labels it `DEV MODE` with the notice "no real SMS was sent".
+  labels it `DEV MODE` with the notice "no real SMS was sent". With
+  `NODE_ENV=production` and no provider, `/api/auth/otp/request` returns **503
+  `otp_unavailable`** — a server that cannot send an OTP says so instead of
+  pretending.
 - **Reminders / push / WhatsApp** — without providers, messages are recorded as
-  `pending`. The system never writes `sent`.
+  `pending`/`queued` with the reason in `errorDetails`. The system never writes
+  `sent`, and `sentAt` stays empty. `integrations.test.ts` fails the build if
+  that ever changes.
 
 ---
 
 ## Why not Convex / Freebuff (as the spec suggested)?
 
-The spec proposed a managed backend. This build deliberately uses
-Node + Express + SQLite so that it is **self-contained and runs with zero
-credentials**, which is what makes it testable and reviewable offline. The service
-layer isolates money through a single `tx()` transaction boundary, so moving to
-Postgres (or a managed backend) is a driver swap rather than a rewrite. See
-`REVIEW.md` §10 for the migration path.
+The spec proposed a managed backend. This build keeps the service layer portable
+instead: one `tx()` boundary around money, one `db.ts` driver, and SQL that runs
+unchanged on Neon or PGlite. That is what makes the app testable with **zero
+credentials** (the suite is in-memory Postgres) while still being a real
+production deployment on a managed Postgres. See `REVIEW.md` §10.
 
 ---
 
@@ -294,26 +405,30 @@ Postgres (or a managed backend) is a driver swap rather than a rewrite. See
 ```
 salonpro/
 ├── apps/
-│   ├── api/                 # Express API + SQLite
+│   ├── api/                 # Express API + Postgres (Neon / PGlite)
 │   │   ├── src/
 │   │   │   ├── app.ts       # buildApp() — side-effect-free Express app
-│   │   │   ├── index.ts     # listener + scheduler bootstrap
-│   │   │   ├── db.ts        # schema + query/tx helpers
+│   │   │   ├── index.ts     # listener + migrate() + scheduler bootstrap
+│   │   │   ├── db.ts        # driver (pg | PGlite), toPg() translation, schema, tx()
+│   │   │   ├── seed.ts      # demo seed (--reset) and live bootstrap (--bootstrap)
 │   │   │   ├── auth.ts      # password hashing, sessions, RBAC, audit
 │   │   │   ├── routes/      # auth, catalog, customer, admin, payments
 │   │   │   └── services/    # wallet, booking, payments, refunds, referral, …
-│   │   └── test/            # harness + 72 integration tests
+│   │   └── test/            # harness + 119 tests (db, routes, smoke, integrations, …)
 │   └── web/                 # React PWA (shared source for both apps)
 │       ├── src/pages/       # customer/ and admin/ screens
+│       ├── src/lib/native.ts# Capacitor bridge: back button, haptics, share, status bar
 │       ├── src/lib/mode.ts  # VITE_APP_MODE: customer vs admin build
 │       ├── dist/            # customer bundle
 │       ├── dist-admin/      # admin bundle (dashboard only)
-│       └── test/            # 41 UI + render tests
+│       └── test/            # 80 tests (mobile UX, pages, crash safety, primitives)
 ├── apps/admin/              # Capacitor shell for SalonPro Admin (com.salonpro.admin)
 │   ├── capacitor.config.ts
 │   └── android/             # generated Gradle project + launcher icons
 ├── scripts/build-apk.sh     # build/install either APK over USB
+├── scripts/serve.sh         # restart the API cleanly on :4000
 ├── packages/shared/         # types + money/time/format helpers (+ 9 tests)
+├── .env                     # DATABASE_URL, secrets (gitignored)
 ├── REVIEW.md                # spec critique and gap analysis
 └── README.md
 ```

@@ -1,33 +1,116 @@
-import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { env } from './env';
 
 /**
- * SQLite via the Node built-in driver (`node:sqlite`).
+ * Postgres data access.
  *
- * Deliberately synchronous: the driver is synchronous and single-threaded, so a
- * check-then-insert inside `tx()` cannot interleave with another request. That
- * is what makes concurrent booking conflict checks and wallet credits safe
- * without an external lock service.
+ * Production runs on Neon (`DATABASE_URL=postgresql://…`); local runs and the
+ * test suite run on PGlite (`DATABASE_URL=pglite:memory:`), which is real
+ * Postgres compiled to WASM — no server to install, same SQL semantics.
+ *
+ * The rest of the codebase only uses `one/all/run/scalar/tx`, and keeps writing
+ * SQLite-flavoured SQL (`?` placeholders, camelCase identifiers). `toPg()`
+ * translates it on the way out:
+ *   - `?`            → `$1, $2, …`
+ *   - camelCase name → "quoted", so Postgres preserves the case instead of
+ *                      folding it to lowercase (which would break every
+ *                      `row.createdAt` in the codebase).
  */
-
-fs.mkdirSync(path.dirname(env.databaseFile), { recursive: true });
-
-export const sql = new DatabaseSync(env.databaseFile);
-
-sql.exec('PRAGMA journal_mode = WAL;');
-sql.exec('PRAGMA foreign_keys = ON;');
-sql.exec('PRAGMA busy_timeout = 5000;');
-
-/* ------------------------------------------------------------------ */
-/* Query helpers                                                       */
-/* ------------------------------------------------------------------ */
 
 export type Row = Record<string, any>;
 type Bindable = string | number | bigint | null | Uint8Array | boolean | undefined;
 
-function normalize(params: Bindable[]): (string | number | bigint | null | Uint8Array)[] {
+/* ------------------------------------------------------------------ */
+/* SQL translation                                                     */
+/* ------------------------------------------------------------------ */
+
+/** Lower-case words that are reserved enough in Postgres to need quoting. */
+const QUOTE_ALWAYS = new Set(['timestamp']);
+
+function isWordStart(ch: string) {
+  return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch === '_';
+}
+function isWordChar(ch: string) {
+  return isWordStart(ch) || (ch >= '0' && ch <= '9');
+}
+
+/**
+ * Rewrite a SQLite-flavoured statement for Postgres. String literals and
+ * comments are copied through untouched (so a `?` or a camelCase word inside a
+ * literal is never rewritten).
+ */
+export function toPg(sql: string): string {
+  let out = '';
+  let i = 0;
+  let params = 0;
+
+  while (i < sql.length) {
+    const ch = sql[i]!;
+
+    if (ch === "'") {
+      out += ch;
+      i++;
+      while (i < sql.length) {
+        if (sql[i] === "'") {
+          if (sql[i + 1] === "'") {
+            out += "''";
+            i += 2;
+            continue;
+          }
+          out += "'";
+          i++;
+          break;
+        }
+        out += sql[i++];
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      out += ch;
+      i++;
+      while (i < sql.length) {
+        if (sql[i] === '"') {
+          out += '"';
+          i++;
+          break;
+        }
+        out += sql[i++];
+      }
+      continue;
+    }
+
+    if (ch === '-' && sql[i + 1] === '-') {
+      while (i < sql.length && sql[i] !== '\n') out += sql[i++];
+      continue;
+    }
+
+    if (ch === '?') {
+      params += 1;
+      out += `$${params}`;
+      i++;
+      continue;
+    }
+
+    if (isWordStart(ch)) {
+      let j = i;
+      while (j < sql.length && isWordChar(sql[j]!)) j++;
+      const word = sql.slice(i, j);
+      const camel = /^[a-z]/.test(word) && /[A-Z]/.test(word);
+      out += camel || QUOTE_ALWAYS.has(word) ? `"${word}"` : word;
+      i = j;
+      continue;
+    }
+
+    out += ch;
+    i++;
+  }
+
+  return out;
+}
+
+function normalize(params: (Bindable | unknown)[]): unknown[] {
   return params.map((p) => {
     if (p === undefined || p === null) return null;
     if (typeof p === 'boolean') return p ? 1 : 0;
@@ -35,48 +118,191 @@ function normalize(params: Bindable[]): (string | number | bigint | null | Uint8
   });
 }
 
-export function one<T = Row>(query: string, ...params: Bindable[]): T | undefined {
-  return sql.prepare(query).get(...normalize(params)) as T | undefined;
+/* ------------------------------------------------------------------ */
+/* Connections                                                         */
+/* ------------------------------------------------------------------ */
+
+interface Result {
+  rows: Row[];
+  rowCount: number;
+}
+interface Conn {
+  query(sql: string, params?: unknown[]): Promise<Result>;
+  release?(): void;
+}
+interface Driver {
+  /** True when every query shares one connection (PGlite) and must be queued. */
+  singleConnection: boolean;
+  query(sql: string, params: unknown[]): Promise<Result>;
+  connect(): Promise<Conn>;
+  end(): Promise<void>;
 }
 
-export function all<T = Row>(query: string, ...params: Bindable[]): T[] {
-  return sql.prepare(query).all(...normalize(params)) as T[];
+const store = new AsyncLocalStorage<Conn>();
+
+let driver: Driver | null = null;
+let starting: Promise<Driver> | null = null;
+
+function wrapRows(rows: Row[]): Row[] {
+  for (const row of rows) {
+    for (const key of Object.keys(row)) {
+      if (typeof row[key] === 'bigint') row[key] = Number(row[key]);
+    }
+  }
+  return rows;
 }
 
-export function run(query: string, ...params: Bindable[]) {
-  return sql.prepare(query).run(...normalize(params));
+async function createDriver(): Promise<Driver> {
+  const url = env.databaseUrl;
+  if (url.startsWith('pglite:')) {
+    const target = url.slice('pglite:'.length);
+    const { PGlite } = await import('@electric-sql/pglite');
+    const db = target === 'memory:' || target === '' ? new PGlite() : new PGlite(target);
+    await db.waitReady;
+    const conn: Conn = {
+      async query(sql, params) {
+        const res = await db.query(sql, (params ?? []) as any[]);
+        return res as unknown as Result;
+      },
+    };
+    return {
+      singleConnection: true,
+      query: (sql, params) => conn.query(sql, params),
+      connect: async () => conn,
+      end: async () => {
+        await db.close();
+      },
+    };
+  }
+
+  const pg = (await import('pg')).default;
+  /* int8 (COUNT/SUM) arrives as a string by default — make it a number so
+   * arithmetic in the API keeps working. */
+  pg.types.setTypeParser(20, (v: string) => Number(v));
+  pg.types.setTypeParser(1700, (v: string) => Number(v));
+
+  const pool = new pg.Pool({
+    connectionString: url,
+    max: 6,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 20_000,
+  });
+
+  const shape = (res: any): Result => ({ rows: wrapRows(res.rows ?? []), rowCount: res.rowCount ?? 0 });
+
+  return {
+    singleConnection: false,
+    async query(sql, params) {
+      return shape(await pool.query(sql, params));
+    },
+    async connect() {
+      const client = await pool.connect();
+      return {
+        async query(sql, params) {
+          return shape(await client.query(sql, params));
+        },
+        release: () => client.release(),
+      };
+    },
+    end: async () => {
+      await pool.end();
+    },
+  };
 }
 
-export function scalar<T = number>(query: string, ...params: Bindable[]): T {
-  const row = one<Record<string, any>>(query, ...params);
+function ready(): Promise<Driver> {
+  if (!driver) starting ??= createDriver().then((d) => (driver = d));
+  return Promise.resolve(driver ?? starting!);
+}
+
+export async function closeDatabase(): Promise<void> {
+  if (driver) await driver.end();
+  driver = null;
+  starting = null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Single-connection queue (PGlite)                                    */
+/* ------------------------------------------------------------------ */
+
+let queue: Promise<unknown> = Promise.resolve();
+
+function enqueue<T>(fn: () => Promise<T>): Promise<T> {
+  const next = queue.then(fn, fn);
+  queue = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+/* ------------------------------------------------------------------ */
+/* Query helpers                                                       */
+/* ------------------------------------------------------------------ */
+
+async function execute(sql: string, params: unknown[]): Promise<Result> {
+  const d = await ready();
+  const conn = store.getStore();
+  const text = toPg(sql);
+  const values = normalize(params);
+  if (conn) return conn.query(text, values);
+  if (d.singleConnection) return enqueue(() => d.query(text, values));
+  return d.query(text, values);
+}
+
+export async function one<T = Row>(query: string, ...params: Bindable[]): Promise<T | undefined> {
+  const res = await execute(query, params);
+  return res.rows[0] as T | undefined;
+}
+
+export async function all<T = Row>(query: string, ...params: Bindable[]): Promise<T[]> {
+  const res = await execute(query, params);
+  return res.rows as T[];
+}
+
+export async function run(query: string, ...params: Bindable[]): Promise<{ rowCount: number }> {
+  const res = await execute(query, params);
+  return { rowCount: res.rowCount };
+}
+
+export async function scalar<T = number>(query: string, ...params: Bindable[]): Promise<T> {
+  const row = await one<Record<string, any>>(query, ...params);
   if (!row) return 0 as unknown as T;
   const values = Object.values(row);
   return (values[0] ?? 0) as T;
 }
 
 /**
- * Run a function inside an IMMEDIATE transaction. Nested calls are flattened
- * into the outer transaction. Any throw rolls the whole thing back.
+ * Run a function inside a transaction. Nested calls join the outer transaction.
+ * On Postgres each transaction gets its own pooled connection, so concurrent
+ * requests never share one; on PGlite (a single connection) transactions are
+ * serialised through the queue.
  */
-let txDepth = 0;
-export function tx<T>(fn: () => T): T {
-  if (txDepth > 0) return fn();
-  sql.exec('BEGIN IMMEDIATE');
-  txDepth++;
-  try {
-    const result = fn();
-    sql.exec('COMMIT');
-    return result;
-  } catch (err) {
+export async function tx<T>(fn: () => Promise<T> | T): Promise<T> {
+  const existing = store.getStore();
+  if (existing) return fn();
+
+  const d = await ready();
+  const work = async (): Promise<T> => {
+    const conn = await d.connect();
     try {
-      sql.exec('ROLLBACK');
-    } catch {
-      /* already rolled back */
+      await conn.query('BEGIN');
+      const result = await store.run(conn, async () => fn());
+      await conn.query('COMMIT');
+      return result;
+    } catch (err) {
+      try {
+        await conn.query('ROLLBACK');
+      } catch {
+        /* the connection is already unusable — the release below recovers it */
+      }
+      throw err;
+    } finally {
+      conn.release?.();
     }
-    throw err;
-  } finally {
-    txDepth--;
-  }
+  };
+
+  return d.singleConnection ? enqueue(work) : work();
 }
 
 export function parseJson<T>(value: unknown, fallback: T): T {
@@ -565,19 +791,30 @@ CREATE TABLE IF NOT EXISTS app_meta (
 );
 `;
 
-export function migrate() {
-  sql.exec(SCHEMA);
-  const row = one<{ id: number }>('SELECT id FROM app_meta WHERE id = 1');
-  if (!row) {
-    run('INSERT INTO app_meta (id, lastReminderRunAt, installedAt) VALUES (1, NULL, ?)', new Date().toISOString());
+export async function migrate(): Promise<void> {
+  /* One statement per round trip: Postgres refuses multiple commands in a
+   * single prepared statement, which is how both drivers send parameterised
+   * queries. Statements are separated by `;` and the schema contains no
+   * semicolons inside literals, so a plain split is safe. */
+  for (const statement of SCHEMA.split(';')) {
+    const trimmed = statement.trim();
+    if (trimmed) await run(trimmed);
+  }
+  await run(
+    'INSERT INTO app_meta (id, lastReminderRunAt, installedAt) VALUES (1, NULL, ?) ON CONFLICT (id) DO NOTHING',
+    new Date().toISOString(),
+  );
+}
+
+/** Drop every table in the public schema (tests and `seed --reset`). */
+export async function resetDatabase(): Promise<void> {
+  const tables = await all<{ table_name: string }>(
+    "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'",
+  );
+  for (const t of tables) {
+    await run(`DROP TABLE IF EXISTS "${t.table_name}" CASCADE`);
   }
 }
 
-export function resetDatabase() {
-  const tables = all<{ name: string }>(
-    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-  );
-  sql.exec('PRAGMA foreign_keys = OFF;');
-  for (const t of tables) sql.exec(`DROP TABLE IF EXISTS "${t.name}"`);
-  sql.exec('PRAGMA foreign_keys = ON;');
-}
+/** Absolute path helper kept for callers that still reference the data dir. */
+export const dataDir = path.resolve(env.repoRoot, 'data');

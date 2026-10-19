@@ -81,8 +81,8 @@ test('session tokens are stored hashed, never in clear', async () => {
     .createHash('sha256')
     .update(token + process.env.SESSION_SECRET)
     .digest('hex');
-  assert.equal(h.db.one('SELECT id FROM sessions WHERE tokenHash = ?', token), undefined);
-  assert.ok(h.db.one('SELECT id FROM sessions WHERE tokenHash = ?', hashed));
+  assert.equal(await h.db.one('SELECT id FROM sessions WHERE tokenHash = ?', token), undefined);
+  assert.ok(await h.db.one('SELECT id FROM sessions WHERE tokenHash = ?', hashed));
 });
 
 test('/auth/me returns the signed-in identity and a wallet for customers', async () => {

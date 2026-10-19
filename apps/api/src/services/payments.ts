@@ -70,9 +70,9 @@ interface CreateOrderArgs {
 }
 
 export function createOrder(args: CreateOrderArgs) {
-  return tx(() => {
+  return tx(async () => {
     if (args.idempotencyKey) {
-      const existing = one<DbRow>(
+      const existing = await one<DbRow>(
         'SELECT * FROM payment_orders WHERE idempotencyKey = ?',
         args.idempotencyKey,
       );
@@ -84,7 +84,7 @@ export function createOrder(args: CreateOrderArgs) {
       ? `order_pending_${crypto.randomUUID()}` // replaced after the live API call
       : `order_sim_${crypto.randomBytes(8).toString('hex')}`;
     const id = crypto.randomUUID();
-    run(
+    await run(
       `INSERT INTO payment_orders
         (id, salonId, customerId, razorpayOrderId, amount, amountPaid, currency, purpose, status, mode, referenceId, receipt, notes, idempotencyKey, createdAt)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -104,13 +104,13 @@ export function createOrder(args: CreateOrderArgs) {
       args.idempotencyKey ?? `order_${id}`,
       new Date().toISOString(),
     );
-    return one<DbRow>('SELECT * FROM payment_orders WHERE id = ?', id)!;
+    return (await one<DbRow>('SELECT * FROM payment_orders WHERE id = ?', id))!;
   });
 }
 
 /** Called from the payments route after the live order is created upstream. */
-export function attachRazorpayOrderId(orderId: string, razorpayOrderId: string) {
-  run('UPDATE payment_orders SET razorpayOrderId = ? WHERE id = ?', razorpayOrderId, orderId);
+export async function attachRazorpayOrderId(orderId: string, razorpayOrderId: string) {
+  await run('UPDATE payment_orders SET razorpayOrderId = ? WHERE id = ?', razorpayOrderId, orderId);
 }
 
 export function getOrderByRazorpayId(razorpayOrderId: string) {
@@ -122,20 +122,20 @@ export function getOrder(id: string) {
 }
 
 /** Record a payment attempt (no money moves). */
-export function markAttempted(orderId: string) {
-  run("UPDATE payment_orders SET status = 'attempted' WHERE id = ? AND status = 'created'", orderId);
+export async function markAttempted(orderId: string) {
+  await run("UPDATE payment_orders SET status = 'attempted' WHERE id = ? AND status = 'created'", orderId);
 }
 
-export function markFailed(orderId: string, reason?: string) {
-  run(
+export async function markFailed(orderId: string, reason?: string) {
+  await run(
     "UPDATE payment_orders SET status = 'failed', notes = COALESCE(?, notes) WHERE id = ? AND status IN ('created','attempted')",
     reason ?? null,
     orderId,
   );
 }
 
-export function markPaid(orderId: string, paymentId: string, signature: string | null) {
-  run(
+export async function markPaid(orderId: string, paymentId: string, signature: string | null) {
+  await run(
     "UPDATE payment_orders SET status = 'paid', paymentId = ?, signature = ?, amountPaid = amount, verifiedAt = ? WHERE id = ?",
     paymentId,
     signature,
@@ -152,10 +152,10 @@ export function markPaid(orderId: string, paymentId: string, signature: string |
  * Claim a provider event id. Returns false when the event was already
  * processed — the caller then returns 200 without repeating side effects.
  */
-export function claimEvent(eventId: string, type: string, paymentOrderId: string | null, payload: unknown): boolean {
-  const existing = one<{ id: string }>('SELECT id FROM payment_events WHERE eventId = ?', eventId);
+export async function claimEvent(eventId: string, type: string, paymentOrderId: string | null, payload: unknown): Promise<boolean> {
+  const existing = await one<{ id: string }>('SELECT id FROM payment_events WHERE eventId = ?', eventId);
   if (existing) return false;
-  run(
+  await run(
     'INSERT INTO payment_events (id, paymentOrderId, eventId, type, payload, processedAt, createdAt) VALUES (?,?,?,?,?,?,?)',
     crypto.randomUUID(),
     paymentOrderId,
@@ -193,7 +193,7 @@ export function toPaymentOrder(row: DbRow, customerName?: string): PaymentOrder 
   };
 }
 
-export function listOrders(salonId: string, opts: { limit?: number; status?: string; customerId?: string } = {}) {
+export async function listOrders(salonId: string, opts: { limit?: number; status?: string; customerId?: string } = {}) {
   const clauses = ['o.salonId = ?'];
   const params: (string | number)[] = [salonId];
   if (opts.status) {
@@ -205,13 +205,14 @@ export function listOrders(salonId: string, opts: { limit?: number; status?: str
     params.push(opts.customerId);
   }
   params.push(opts.limit ?? 100);
-  return all<DbRow>(
+  const rows = await all<DbRow>(
     `SELECT o.*, u.name AS customerName FROM payment_orders o
        JOIN users u ON u.id = o.customerId
       WHERE ${clauses.join(' AND ')}
       ORDER BY o.createdAt DESC LIMIT ?`,
     ...params,
-  ).map((r) => toPaymentOrder(r, r.customerName));
+  );
+  return rows.map((r) => toPaymentOrder(r, r.customerName));
 }
 
 export function parseOrderNotes(row: DbRow): Record<string, string> {

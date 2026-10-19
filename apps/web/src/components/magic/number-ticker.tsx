@@ -4,6 +4,23 @@ import { cn } from '@/lib/utils';
 
 const inr = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
 
+/* Formatters are cached by precision: `decimals` is part of the public API, so
+ * requesting 2 must render "12.50" rather than letting Intl drop the trailing
+ * zero, while zero-decimal figures keep Indian digit grouping. */
+const formatters = new Map<number, Intl.NumberFormat>();
+function numberFormat(decimals: number) {
+  if (decimals <= 0) return inr;
+  let formatter = formatters.get(decimals);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat('en-IN', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: Math.max(decimals, 2),
+    });
+    formatters.set(decimals, formatter);
+  }
+  return formatter;
+}
+
 interface TickerProps {
   value: number;
   prefix?: string;
@@ -14,8 +31,13 @@ interface TickerProps {
   format?: (n: number) => string;
 }
 
-const formatNumber = (n: number, { prefix = '', suffix = '', decimals = 0, format }: TickerProps) =>
-  `${prefix}${format ? format(n) : inr.format(Number(n.toFixed(decimals)))}${suffix}`;
+const formatNumber = (n: number, { prefix = '', suffix = '', decimals = 0, format }: TickerProps) => {
+  // A metric the API did not send must never take the screen down:
+  // `undefined.toFixed()` throws inside render, and a crashed tree is blank.
+  // An unknown figure reads as zero, exactly like an empty database does.
+  const safe = Number.isFinite(Number(n)) ? Number(n) : 0;
+  return `${prefix}${format ? format(safe) : numberFormat(decimals).format(safe)}${suffix}`;
+};
 
 /**
  * Magic UI's NumberTicker — springs a figure up from zero when it appears.

@@ -13,11 +13,15 @@
 #   customer -> apps/web/dist          (landing + customer app + dashboard)
 #   admin    -> apps/web/dist-admin    (dashboard only; built with VITE_APP_MODE=admin)
 #
-# Requirements (already present on this machine):
+# Requirements:
 #   - JDK 17            ($HOME/.local/share/mise/installs/java/17)
 #   - Android SDK       ($HOME/Android/Sdk : platform-tools, platforms;android-34, build-tools;34.0.0)
-#   - Gradle 8.2.1      (/tmp/opencode/gradle-8.2.1/bin/gradle)
+#   - Gradle 8.x        an explicit $GRADLE, a copy already cached under
+#                       ~/.gradle/wrapper/dists, or `gradle` on PATH
 #   - adb + a phone with USB debugging enabled (for install)
+#
+# Gradle is resolved in that order rather than from a fixed path, so the build
+# keeps working after /tmp is cleaned and needs no download.
 #
 set -euo pipefail
 
@@ -54,12 +58,38 @@ esac
 
 JAVA_HOME="${JAVA_HOME:-$HOME/.local/share/mise/installs/java/17}"
 ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
-GRADLE="${GRADLE:-/tmp/opencode/gradle-8.2.1/bin/gradle}"
 export JAVA_HOME ANDROID_HOME
 export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$JAVA_HOME/bin:$PATH"
 
-if [ ! -x "$GRADLE" ]; then
-  echo "ERROR: gradle not found at $GRADLE (set GRADLE=/path/to/gradle)" >&2
+# A Gradle distribution the wrapper has already unpacked is the fastest and most
+# reliable option: it is a real 8.x install and needs no network.
+cached_gradle() {
+  local bin
+  for bin in "$HOME"/.gradle/wrapper/dists/gradle-8*/[0-9a-z]*/gradle-8*/bin/gradle; do
+    if [ -x "$bin" ]; then
+      printf '%s\n' "$bin"
+      return 0
+    fi
+  done
+  return 1
+}
+
+GRADLE_CMD=()
+if [ -n "${GRADLE:-}" ]; then
+  if [ ! -x "$GRADLE" ]; then
+    echo "ERROR: GRADLE=$GRADLE is not an executable file" >&2
+    exit 1
+  fi
+  GRADLE_CMD=("$GRADLE")
+elif cached_gradle >/dev/null; then
+  GRADLE_CMD=("$(cached_gradle)")
+elif command -v gradle >/dev/null 2>&1; then
+  GRADLE_CMD=("gradle")
+elif [ -x "$ANDROID_DIR/gradlew" ]; then
+  # Last resort: the wrapper will download its pinned distribution.
+  GRADLE_CMD=("./gradlew")
+else
+  echo "ERROR: no Gradle found. Set GRADLE=/path/to/gradle or install gradle." >&2
   exit 1
 fi
 
@@ -72,6 +102,7 @@ echo " SalonPro -> Android APK"
 echo " target      : $TARGET  ($APP_NAME)"
 echo " package     : $APP_ID"
 echo " API base    : $API_BASE"
+echo " gradle      : ${GRADLE_CMD[*]}"
 echo " (phone must be on the same Wi-Fi as this PC)"
 echo "=============================================="
 
@@ -92,7 +123,7 @@ echo "==> [3/5] cap sync android"
 echo
 echo "==> [4/5] gradle assembleDebug"
 echo "sdk.dir=$ANDROID_HOME" > "$ANDROID_DIR/local.properties"
-( cd "$ANDROID_DIR" && "$GRADLE" assembleDebug --console=plain )
+( cd "$ANDROID_DIR" && "${GRADLE_CMD[@]}" assembleDebug --console=plain )
 
 APK="$ROOT/$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
 echo

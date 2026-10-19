@@ -82,7 +82,7 @@ test('a tampered signature is rejected and no money moves', async () => {
     razorpaySignature: 'f'.repeat(64),
   }, token);
   assert.equal(res.status, 400);
-  const order = h.db.one<{ status: string }>('SELECT status FROM payment_orders WHERE razorpayOrderId = ?', checkout.orderId);
+  const order = await h.db.one<{ status: string }>('SELECT status FROM payment_orders WHERE razorpayOrderId = ?', checkout.orderId);
   assert.notEqual(order!.status, 'paid');
 });
 
@@ -170,7 +170,7 @@ test('an appointment can be paid online and settles as paid', async () => {
     token,
   );
   assert.equal(sim.status, 200);
-  const appt = h.db.one<{ paymentStatus: string; paidAmount: number }>('SELECT paymentStatus, paidAmount FROM appointments WHERE id = ?', appointmentId);
+  const appt = await h.db.one<{ paymentStatus: string; paidAmount: number }>('SELECT paymentStatus, paidAmount FROM appointments WHERE id = ?', appointmentId);
   assert.equal(appt!.paymentStatus, 'paid');
   assert.equal(appt!.paidAmount, service.price);
 });

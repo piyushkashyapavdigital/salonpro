@@ -50,7 +50,7 @@ test('a branch manager can view reports but cannot adjust wallets', async () => 
   const token = await h.login(ACCOUNTS.manager);
   const reports = await h.get('/admin/reports/retention', token);
   assert.equal(reports.status, 200);
-  const cid = h.db.one<{ id: string }>('SELECT id FROM users WHERE phone = ?', ACCOUNTS.customer2)!.id;
+  const cid = (await h.db.one<{ id: string }>('SELECT id FROM users WHERE phone = ?', ACCOUNTS.customer2))!.id;
   const adjust = await h.post(
     `/admin/customers/${cid}/wallet/adjust`,
     { amount: 100, balanceType: 'cash', reason: 'manager should not do this' },
@@ -73,12 +73,12 @@ test('a stylist may start or complete but not confirm appointments', async () =>
 });
 
 test('a manager cannot create an appointment for an unauthorised branch', async () => {
-  const managerId = h.db.one<{ id: string }>('SELECT id FROM users WHERE phone = ?', ACCOUNTS.manager)!.id;
-  const mine = h.db.all<{ branchId: string }>('SELECT branchId FROM user_branches WHERE userId = ?', managerId).map((r) => r.branchId);
-  const other = h.db.all<{ id: string }>('SELECT id FROM branches').find((b) => !mine.includes(b.id));
+  const managerId = (await h.db.one<{ id: string }>('SELECT id FROM users WHERE phone = ?', ACCOUNTS.manager))!.id;
+  const mine = (await h.db.all<{ branchId: string }>('SELECT branchId FROM user_branches WHERE userId = ?', managerId)).map((r) => r.branchId);
+  const other = (await h.db.all<{ id: string }>('SELECT id FROM branches')).find((b) => !mine.includes(b.id));
   if (!other) return; // manager has every branch in this seed
 
-  const service = h.db.one<{ id: string }>('SELECT id FROM services LIMIT 1')!;
+  const service = (await h.db.one<{ id: string }>('SELECT id FROM services LIMIT 1'))!;
   const date = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
   const token = await h.login(ACCOUNTS.manager);
   const res = await h.post(
@@ -113,6 +113,6 @@ test('customers cannot read another customer\'s wallet transactions', async () =
   const res = await h.get('/customer/wallet', b);
   assert.equal(res.status, 200);
   /* The wallet returned must belong to the caller, never to customer 1. */
-  const aId = h.db.one<{ id: string }>('SELECT id FROM users WHERE phone = ?', ACCOUNTS.customer1)!.id;
+  const aId = (await h.db.one<{ id: string }>('SELECT id FROM users WHERE phone = ?', ACCOUNTS.customer1))!.id;
   assert.notEqual(res.data.wallet.customerId, aId);
 });

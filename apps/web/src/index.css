@@ -233,3 +233,18 @@
     display: none !important;
   }
 }
+
+/* Respect the OS "reduce motion" switch: a phone with the setting on should not
+   get sliding pills, meteors or ticking numbers. Framer Motion animations are
+   handled by <MotionConfig reducedMotion="user"> in App.tsx; this covers the
+   CSS-driven ones (marquee, shimmer, blur fades). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

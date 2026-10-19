@@ -20,7 +20,10 @@
     "test:api": "npm --workspace @salonpro/api run test",
     "test:shared": "npm --workspace @salonpro/shared run test",
     "test:web": "npm --workspace @salonpro/web run test",
-    "typecheck": "npm --workspace @salonpro/api run typecheck && npm --workspace @salonpro/web run typecheck"
+    "typecheck": "npm --workspace @salonpro/api run typecheck && npm --workspace @salonpro/web run typecheck",
+    "seed:reset": "npm --workspace @salonpro/api run seed:reset",
+    "seed:bootstrap": "npm --workspace @salonpro/api run bootstrap",
+    "test:smoke": "npm --workspace @salonpro/api run smoke"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

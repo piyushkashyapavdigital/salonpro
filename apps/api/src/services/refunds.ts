@@ -26,16 +26,16 @@ export interface RefundArgs {
  */
 export async function refundPayment(args: RefundArgs) {
   const order = args.paymentOrderId
-    ? one<Record<string, any>>('SELECT * FROM payment_orders WHERE id = ? AND salonId = ?', args.paymentOrderId, args.salonId)
+    ? await one<Record<string, any>>('SELECT * FROM payment_orders WHERE id = ? AND salonId = ?', args.paymentOrderId, args.salonId)
     : args.appointmentId
-      ? one<Record<string, any>>(
+      ? await one<Record<string, any>>(
           "SELECT * FROM payment_orders WHERE referenceId = ? AND salonId = ? ORDER BY createdAt DESC LIMIT 1",
           args.appointmentId,
           args.salonId,
         )
       : null;
 
-  const refundable = order ? order.amountPaid - refundedAmount(order.id) : Number.MAX_SAFE_INTEGER;
+  const refundable = order ? order.amountPaid - (await refundedAmount(order.id)) : Number.MAX_SAFE_INTEGER;
   if (order && args.amount > refundable) {
     throw conflict(`You can refund at most \u20b9${(refundable / 100).toFixed(2)} on that payment.`);
   }
@@ -76,14 +76,14 @@ export async function refundPayment(args: RefundArgs) {
     }
   }
 
-  return tx(() => {
+  return tx(async () => {
     const refundId = crypto.randomUUID();
     const now = new Date().toISOString();
     let walletTransactionId: string | null = null;
 
     if (status === 'processed' && args.toWallet !== false) {
-      const wallet = getOrCreateWallet(args.salonId, args.customerId);
-      const entry = postEntry({
+      const wallet = await getOrCreateWallet(args.salonId, args.customerId);
+      const entry = await postEntry({
         walletId: wallet.id,
         customerId: args.customerId,
         salonId: args.salonId,
@@ -98,7 +98,7 @@ export async function refundPayment(args: RefundArgs) {
       walletTransactionId = entry.id;
     }
 
-    run(
+    await run(
       `INSERT INTO refunds (id, paymentOrderId, appointmentId, customerId, salonId, amount, reason, status, actorId, walletTransactionId, createdAt)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       refundId,
@@ -115,19 +115,19 @@ export async function refundPayment(args: RefundArgs) {
     );
 
     if (order) {
-      const totalRefunded = refundedAmount(order.id);
+      const totalRefunded = await refundedAmount(order.id);
       const nextStatus = totalRefunded >= order.amountPaid ? 'refunded' : 'partially_refunded';
       if (status === 'processed') {
-        run('UPDATE payment_orders SET status = ? WHERE id = ?', nextStatus, order.id);
+        await run('UPDATE payment_orders SET status = ? WHERE id = ?', nextStatus, order.id);
       }
     }
 
     if (args.appointmentId) {
-      run("UPDATE appointments SET paymentStatus = 'refunded', paidAmount = 0, updatedAt = ? WHERE id = ?", now, args.appointmentId);
-      reverseIfQualifyingCancelled(args.appointmentId);
+      await run("UPDATE appointments SET paymentStatus = 'refunded', paidAmount = 0, updatedAt = ? WHERE id = ?", now, args.appointmentId);
+      await reverseIfQualifyingCancelled(args.appointmentId);
     }
 
-    audit(args.actorId, 'payment.refund', order ? 'payment_order' : 'appointment', order?.id ?? args.appointmentId ?? refundId, {
+    await audit(args.actorId, 'payment.refund', order ? 'payment_order' : 'appointment', order?.id ?? args.appointmentId ?? refundId, {
       amount: args.amount,
       reason: args.reason,
       status,
@@ -147,9 +147,10 @@ export async function refundPayment(args: RefundArgs) {
   });
 }
 
-export function refundedAmount(paymentOrderId: string): number {
-  return one<{ total: number }>(
+export async function refundedAmount(paymentOrderId: string): Promise<number> {
+  const row = await one<{ total: number }>(
     "SELECT COALESCE(SUM(amount),0) AS total FROM refunds WHERE paymentOrderId = ? AND status = 'processed'",
     paymentOrderId,
-  )?.total ?? 0;
+  );
+  return row?.total ?? 0;
 }

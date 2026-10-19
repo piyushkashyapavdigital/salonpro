@@ -72,7 +72,7 @@ test('the JSON body limit is enforced rather than crashing', async () => {
 
 test('a conflicting transition returns 409 with an explanatory message', async () => {
   const token = await h.login(ACCOUNTS.customer1);
-  const owner = h.db.one<{ id: string }>(
+  const owner = await h.db.one<{ id: string }>(
     "SELECT id FROM appointments WHERE customerId = (SELECT id FROM users WHERE phone = ?) AND status IN ('completed','cancelled') LIMIT 1",
     ACCOUNTS.customer1,
   );

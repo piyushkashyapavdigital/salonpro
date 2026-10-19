@@ -1,12 +1,12 @@
 /**
  * In-process test harness.
  *
- * Boots the real Express app on an ephemeral port against a throwaway SQLite
- * file that was seeded with the deterministic demo data. No network mocks, no
- * external services: the tests exercise the same code paths production runs.
+ * Boots the real Express app on an ephemeral port against a throwaway PGlite
+ * database (real Postgres in WebAssembly, in memory) that was seeded with the
+ * deterministic demo data. No database server, no network mocks, no external
+ * services: the tests exercise the same code paths production runs.
  */
 import { once } from 'node:events';
-import fs from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import './setup-env';
@@ -67,17 +67,17 @@ async function build(): Promise<Harness> {
     };
   };
 
-  const seed = () => {
+  const seed = async () => {
     const restore = silence();
     try {
-      db.resetDatabase();
-      runSeed(false);
+      await db.resetDatabase();
+      await runSeed(false);
     } finally {
       restore();
     }
   };
 
-  seed();
+  await seed();
 
   const app = buildApp({ serveStatic: false });
   const server: Server = app.listen(0);
@@ -126,18 +126,12 @@ async function build(): Promise<Harness> {
     patch: (path, body, token) => request('PATCH', path, { body, token }),
     login,
     async reset() {
-      seed();
+      await seed();
     },
     db,
     async close() {
       await new Promise<void>((resolve) => server.close(() => resolve()));
-      try {
-        fs.rmSync(process.env.DATABASE_FILE!, { force: true });
-        fs.rmSync(process.env.DATABASE_FILE! + '-wal', { force: true });
-        fs.rmSync(process.env.DATABASE_FILE! + '-shm', { force: true });
-      } catch {
-        /* ignore */
-      }
+      await db.closeDatabase();
     },
   };
   return harness;

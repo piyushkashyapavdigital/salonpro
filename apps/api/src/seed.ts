@@ -1,20 +1,31 @@
 /**
- * Demo data seeder.
+ * Data seeding for SalonPro.
  *
- *   npm run seed          (from the repo root)
+ *   npm run seed                          demo data (development & tests)
+ *   npm run seed -- --reset               drop everything, then reseed demo data
+ *   npm run seed -- --bootstrap --phone 98xxxxxxxx [--owner "Name"] [--salon "Name"] [--address "…"]
+ *                                         production bootstrap: one salon, one owner,
+ *                                         one branch and the standard recharge offers.
+ *                                         No demo customers, appointments or staff.
  *
- * Demo records are flagged `isDemo = 1` on users and excluded from production
- * reporting when `EXCLUDE_DEMO_FROM_REPORTS` is enabled.
+ * Demo records are flagged `isDemo = 1` on users.
  */
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { hashPassword } from './auth';
-import { all, one, resetDatabase, migrate, run, sql, tx } from './db';
+import { all, one, resetDatabase, migrate, run, closeDatabase, tx } from './db';
 import { fullWeekHours, fullWeekWorkingHours, readSettings } from './services/settings';
 import * as wallet from './services/wallet';
 import { newId } from '@salonpro/shared';
 
 const DEMO_PASSWORD = 'salonpro123';
+
+/** Wallet recharge offers the brief specifies: ₹500→₹550, ₹1000→₹1150, ₹2000→₹2400. */
+const STANDARD_OFFERS = [
+  { pay: 50000, bonus: 5000, label: 'Starter' },
+  { pay: 100000, bonus: 15000, label: 'Popular' },
+  { pay: 200000, bonus: 40000, label: 'Best value' },
+];
 
 /* Deterministic pseudo-random so seeds are reproducible. */
 let seedState = 987654321;
@@ -70,47 +81,128 @@ const STAFF = [
   { name: 'Imran Sheikh', designation: 'Spa Therapist', off: [0], skill: 'Spa' },
 ];
 
-export function runSeed(reset: boolean): boolean {
+/* ------------------------------------------------------------------ */
+/* Production bootstrap                                                */
+/* ------------------------------------------------------------------ */
+
+export interface BootstrapArgs {
+  ownerName: string;
+  ownerPhone: string;
+  salonName: string;
+  address: string;
+  contact?: string;
+  branchName?: string;
+}
+
+/**
+ * Minimal, honest production setup: a salon with one branch, one owner account
+ * and the standard recharge offers. Nothing is invented — every value comes
+ * from the arguments, and the owner signs in with a real OTP.
+ */
+export async function runBootstrap(args: BootstrapArgs): Promise<boolean> {
+  await migrate();
+
+  const existingSalon = await one<{ id: string; name: string }>('SELECT id, name FROM salons LIMIT 1');
+  if (existingSalon) {
+    console.log(`· a salon already exists ("${existingSalon.name}") — nothing to bootstrap.`);
+    return false;
+  }
+
+  const phone = args.ownerPhone.replace(/\D/g, '').slice(-10);
+  if (phone.length !== 10) {
+    console.error('· --phone must be a 10 digit mobile number.');
+    return false;
+  }
+
+  const nowIso = new Date().toISOString();
+  const ownerId = crypto.randomUUID();
+  const salonId = crypto.randomUUID();
+  const branchId = crypto.randomUUID();
+  const settings = readSettings(null);
+
+  await tx(async () => {
+    const existingUser = await one<{ id: string }>('SELECT id FROM users WHERE phone = ?', phone);
+    const userId = existingUser?.id ?? ownerId;
+    if (!existingUser) {
+      await run(
+        'INSERT INTO users (id, name, phone, email, role, status, isDemo, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?,?)',
+        userId, args.ownerName, phone, null, 'salon_owner', 'active', 0, nowIso, nowIso,
+      );
+    } else {
+      await run('UPDATE users SET role = ?, name = ?, updatedAt = ? WHERE id = ?', 'salon_owner', args.ownerName, nowIso, userId);
+    }
+
+    await run(
+      'INSERT INTO salons (id, name, address, contact, timezone, currency, ownerId, settings, createdAt) VALUES (?,?,?,?,?,?,?,?,?)',
+      salonId, args.salonName, args.address, args.contact ?? null, 'Asia/Kolkata', 'INR', userId,
+      JSON.stringify(settings), nowIso,
+    );
+
+    await run(
+      'INSERT INTO branches (id, salonId, name, address, contact, timezone, openingHours, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?)',
+      branchId, salonId, args.branchName ?? `${args.salonName} — Main branch`, args.address, args.contact ?? null,
+      'Asia/Kolkata', JSON.stringify(fullWeekHours('09:00', '21:00', [])), 'active', nowIso,
+    );
+
+    await run('INSERT INTO user_branches (userId, branchId) VALUES (?,?) ON CONFLICT DO NOTHING', userId, branchId);
+
+    for (const [i, offer] of STANDARD_OFFERS.entries()) {
+      await run(
+        'INSERT INTO recharge_offers (id, salonId, payAmount, bonusAmount, label, active, sortOrder) VALUES (?,?,?,?,?,?,?)',
+        crypto.randomUUID(), salonId, offer.pay, offer.bonus, offer.label, 1, i,
+      );
+    }
+
+    await run(
+      'INSERT INTO audit_logs (id, actorId, action, entityType, entityId, meta, ip, timestamp) VALUES (?,?,?,?,?,?,?,?)',
+      crypto.randomUUID(), userId, 'salon.bootstrap', 'salon', salonId, JSON.stringify({ via: 'seed --bootstrap' }), null, nowIso,
+    );
+  });
+
+  console.log('\n✅ Bootstrap complete.\n');
+  console.log(`   Salon    ${args.salonName}`);
+  console.log(`   Owner    ${args.ownerName} (${phone})`);
+  console.log(`   Branch   ${args.branchName ?? `${args.salonName} — Main branch`}`);
+  console.log('');
+  console.log('   Sign in on the admin app with that mobile number. OTP delivery follows');
+  console.log('   server configuration: without an SMS provider you get the development');
+  console.log('   code on screen (never a fake "SMS sent" message).');
+  console.log('');
+  console.log('   Next: add services, staff and branches from the admin app. No demo data was created.');
+  console.log('');
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Demo data                                                           */
+/* ------------------------------------------------------------------ */
+
+export async function runSeed(reset: boolean): Promise<boolean> {
   if (reset) {
-    resetDatabase();
+    await resetDatabase();
     console.log('· dropped existing tables');
   }
-  migrate();
+  await migrate();
 
-  const existing = one<{ n: number }>('SELECT COUNT(*) AS n FROM users');
+  const existing = await one<{ n: number }>('SELECT COUNT(*) AS n FROM users');
   if ((existing?.n ?? 0) > 0 && !reset) {
     console.log('· database already has data — run with --reset to reseed');
     return false;
   }
 
-  tx(() => {
-    sql.exec('DELETE FROM notification_preferences');
-    seedCore();
+  await tx(async () => {
+    await run('DELETE FROM notification_preferences');
+    await seedCore();
   });
   return true;
 }
 
-function main() {
-  const reset = process.argv.includes('--reset');
-  if (!runSeed(reset)) return;
-  console.log('\n✅ Seed complete.\n');
-  console.log('Demo accounts (development only — password: %s)', DEMO_PASSWORD);
-  console.log('  Super Admin     9999999999');
-  console.log('  Salon Owner     9800000001');
-  console.log('  Branch Manager  9800000002');
-  console.log('  Receptionist    9800000003');
-  console.log('  Stylist         9800000010');
-  console.log('  Customer 1      9700000001   (Aarav Mehta — top spender, has referrals)');
-  console.log('  Customer 2      9700000002   (Priya Sharma — inactive, reminder target)');
-  console.log('');
-}
-
-function seedCore() {
+async function seedCore() {
   const demoUsers: string[] = [];
 
-  const createUser = (name: string, phone: string, role: string, email: string | null = null, isDemo = true) => {
+  const createUser = async (name: string, phone: string, role: string, email: string | null = null, isDemo = true) => {
     const id = crypto.randomUUID();
-    run(
+    await run(
       'INSERT INTO users (id, name, phone, email, role, status, passwordHash, isDemo, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?)',
       id,
       name,
@@ -128,14 +220,14 @@ function seedCore() {
   };
 
   /* ---------------- salon, branches, owner ---------------- */
-  const superAdminId = createUser('SalonPro Support', '9999999999', 'super_admin', 'support@salonpro.app');
-  const ownerId = createUser('Deepa Menon', '9800000001', 'salon_owner', 'owner@salonpro.app');
-  const managerId = createUser('Sanjay Bhat', '9800000002', 'branch_manager', 'manager@salonpro.app');
-  const receptionId = createUser('Ritu Singh', '9800000003', 'receptionist', 'reception@salonpro.app');
+  const superAdminId = await createUser('SalonPro Support', '9999999999', 'super_admin', 'support@salonpro.app');
+  const ownerId = await createUser('Deepa Menon', '9800000001', 'salon_owner', 'owner@salonpro.app');
+  const managerId = await createUser('Sanjay Bhat', '9800000002', 'branch_manager', 'manager@salonpro.app');
+  const receptionId = await createUser('Ritu Singh', '9800000003', 'receptionist', 'reception@salonpro.app');
 
   const salonId = crypto.randomUUID();
   const settings = readSettings(null);
-  run(
+  await run(
     'INSERT INTO salons (id, name, address, contact, timezone, currency, ownerId, settings, createdAt) VALUES (?,?,?,?,?,?,?,?,?)',
     salonId,
     'SalonPro',
@@ -154,7 +246,7 @@ function seedCore() {
     { id: crypto.randomUUID(), name: 'Whitefield Lounge', address: 'ITPL Main Road, Whitefield, Bengaluru', closed: [] as number[] },
   ];
   for (const b of branches) {
-    run(
+    await run(
       'INSERT INTO branches (id, salonId, name, address, contact, timezone, openingHours, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?)',
       b.id,
       salonId,
@@ -169,13 +261,13 @@ function seedCore() {
   }
 
   /* a holiday to prove the availability engine respects it */
-  run('INSERT INTO holidays (id, branchId, date, reason) VALUES (?,?,?,?)', crypto.randomUUID(), branches[0]!.id, day(6), 'Annual staff training day');
+  await run('INSERT INTO holidays (id, branchId, date, reason) VALUES (?,?,?,?)', crypto.randomUUID(), branches[0]!.id, day(6), 'Annual staff training day');
 
   /* ---------------- services ---------------- */
   const serviceIds: { id: string; name: string; price: number; duration: number }[] = [];
-  SERVICES.forEach((s, index) => {
+  for (const [index, s] of SERVICES.entries()) {
     const id = crypto.randomUUID();
-    run(
+    await run(
       'INSERT INTO services (id, salonId, name, category, description, price, durationMinutes, active, imageEmoji, sortOrder, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
       id,
       salonId,
@@ -190,19 +282,19 @@ function seedCore() {
       iso(now),
     );
     serviceIds.push({ id, name: s.name, price: s.price, duration: s.duration });
-  });
+  }
 
   /* branch 3 does not offer bridal makeup; branch 2 has a premium on colour */
   const bridal = serviceIds.find((s) => s.name === 'Bridal Makeup')!;
-  run('INSERT INTO branch_services (id, branchId, serviceId, price, active) VALUES (?,?,?,?,?)', crypto.randomUUID(), branches[2]!.id, bridal.id, null, 0);
+  await run('INSERT INTO branch_services (id, branchId, serviceId, price, active) VALUES (?,?,?,?,?)', crypto.randomUUID(), branches[2]!.id, bridal.id, null, 0);
 
   /* ---------------- staff ---------------- */
   const staffIds: { id: string; name: string; branchId: string }[] = [];
-  STAFF.forEach((s, i) => {
-    const userId = createUser(s.name, `98000000${10 + i}`, 'salon_staff', null);
+  for (const [i, s] of STAFF.entries()) {
+    const userId = await createUser(s.name, `98000000${10 + i}`, 'salon_staff', null);
     const staffId = crypto.randomUUID();
     const branchId = branches[i % branches.length]!.id;
-    run(
+    await run(
       'INSERT INTO staff (id, salonId, branchId, userId, designation, workingHours, commissionRules, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?)',
       staffId,
       salonId,
@@ -216,7 +308,7 @@ function seedCore() {
     );
     const secondBranch = branches[(i + 1) % branches.length]!;
     if (i < 2) {
-      run('INSERT INTO staff (id, salonId, branchId, userId, designation, workingHours, commissionRules, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?)',
+      await run('INSERT INTO staff (id, salonId, branchId, userId, designation, workingHours, commissionRules, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?)',
         crypto.randomUUID(), salonId, secondBranch.id, userId, s.designation,
         JSON.stringify(fullWeekWorkingHours('10:00', '20:00', s.off)),
         JSON.stringify({ serviceBps: 800, productBps: 300 }), 'active', iso(now));
@@ -224,25 +316,21 @@ function seedCore() {
     /* lunch break 14:00–15:00 on working days */
     for (let d = 0; d < 7; d++) {
       if (s.off.includes(d)) continue;
-      run('INSERT INTO staff_breaks (id, staffId, weekday, startTime, endTime) VALUES (?,?,?,?,?)', crypto.randomUUID(), staffId, d, '14:00', '15:00');
+      await run('INSERT INTO staff_breaks (id, staffId, weekday, startTime, endTime) VALUES (?,?,?,?,?)', crypto.randomUUID(), staffId, d, '14:00', '15:00');
     }
     staffIds.push({ id: staffId, name: s.name, branchId });
-  });
+  }
 
-  run('INSERT INTO user_branches (userId, branchId) VALUES (?,?)', managerId, branches[0]!.id);
-  run('INSERT INTO user_branches (userId, branchId) VALUES (?,?)', managerId, branches[1]!.id);
-  run('INSERT INTO user_branches (userId, branchId) VALUES (?,?)', receptionId, branches[0]!.id);
+  await run('INSERT INTO user_branches (userId, branchId) VALUES (?,?)', managerId, branches[0]!.id);
+  await run('INSERT INTO user_branches (userId, branchId) VALUES (?,?)', managerId, branches[1]!.id);
+  await run('INSERT INTO user_branches (userId, branchId) VALUES (?,?)', receptionId, branches[0]!.id);
 
   /* ---------------- recharge offers ---------------- */
-  const offers = [
-    { pay: 50000, bonus: 5000, label: 'Starter' },
-    { pay: 100000, bonus: 15000, label: 'Popular' },
-    { pay: 200000, bonus: 40000, label: 'Best value' },
-  ];
-  offers.forEach((o, i) => {
-    run('INSERT INTO recharge_offers (id, salonId, payAmount, bonusAmount, label, active, sortOrder) VALUES (?,?,?,?,?,?,?)',
+  const offers = STANDARD_OFFERS;
+  for (const [i, o] of offers.entries()) {
+    await run('INSERT INTO recharge_offers (id, salonId, payAmount, bonusAmount, label, active, sortOrder) VALUES (?,?,?,?,?,?,?)',
       crypto.randomUUID(), salonId, o.pay, o.bonus, o.label, 1, i);
-  });
+  }
 
   /* ---------------- coupons ---------------- */
   const coupons = [
@@ -251,7 +339,7 @@ function seedCore() {
     { code: 'SPA10', type: 'percent', value: 10, min: 100000, max: 20000, desc: '10% off hair spa rituals', limit: 300 },
   ];
   for (const c of coupons) {
-    run(
+    await run(
       'INSERT INTO coupons (id, salonId, code, type, value, minAmount, maxDiscount, startAt, endAt, usageLimit, usedCount, active, description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
       crypto.randomUUID(), salonId, c.code, c.type, c.value, c.min, c.max,
       iso(new Date(now.getTime() - 30 * 86400000)), iso(new Date(now.getTime() + 120 * 86400000)),
@@ -261,56 +349,55 @@ function seedCore() {
 
   /* ---------------- customers ---------------- */
   const customers: { id: string; name: string; phone: string; createdAt: string }[] = [];
-  CUSTOMER_NAMES.forEach((name, i) => {
+  for (const [i, name] of CUSTOMER_NAMES.entries()) {
     const phone = `97000000${String(i + 1).padStart(2, '0')}`;
-    const id = createUser(name, phone, 'customer', null);
+    const id = await createUser(name, phone, 'customer', null);
     const created = new Date(now.getTime() - randInt(40, 300) * 86400000);
-    run(
+    await run(
       'INSERT INTO customer_profiles (customerId, salonId, lastVisitAt, totalVisits, totalCompletedSpend, preferredServices, marketingConsent, birthday, createdAt) VALUES (?,?,?,?,?,?,?,?,?)',
       id, salonId, null, 0, 0, '[]', i % 7 === 0 ? 0 : 1,
       `${1975 + randInt(0, 25)}-${String(randInt(1, 12)).padStart(2, '0')}-${String(randInt(1, 28)).padStart(2, '0')}`,
       iso(created),
     );
-    run('INSERT INTO notification_preferences (customerId, whatsappConsent, pushEnabled, promotionalConsent, quietHoursStart, quietHoursEnd, updatedAt) VALUES (?,?,?,?,?,?,?)',
+    await run('INSERT INTO notification_preferences (customerId, whatsappConsent, pushEnabled, promotionalConsent, quietHoursStart, quietHoursEnd, updatedAt) VALUES (?,?,?,?,?,?,?)',
       id, 1, 1, 1, '21:00', '09:00', iso(now));
-    const walletRow = wallet.getOrCreateWallet(salonId, id);
-    void walletRow;
+    await wallet.getOrCreateWallet(salonId, id);
     customers.push({ id, name, phone, createdAt: iso(created) });
-  });
+  }
 
   /* ---------------- wallet recharges (ledger consistent) ---------------- */
-  customers.slice(0, 10).forEach((customer, index) => {
+  for (const [index, customer] of customers.slice(0, 10).entries()) {
     const offer = offers[index % offers.length]!;
-    const w = wallet.getOrCreateWallet(salonId, customer.id);
+    const w = await wallet.getOrCreateWallet(salonId, customer.id);
     const orderId = crypto.randomUUID();
     const rzpOrder = `order_sim_seed${index}${crypto.randomBytes(4).toString('hex')}`;
     const paidAt = iso(new Date(now.getTime() - randInt(5, 60) * 86400000));
-    run(
+    await run(
       `INSERT INTO payment_orders (id, salonId, customerId, razorpayOrderId, paymentId, amount, amountPaid, currency, purpose, status, mode, receipt, idempotencyKey, verifiedAt, createdAt)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       orderId, salonId, customer.id, rzpOrder, `pay_sim_seed${index}`, offer.pay, offer.pay, 'INR',
       'wallet_recharge', 'paid', 'simulated', `rcpt_seed_${index}`, `seed_recharge_${customer.id}`, paidAt, paidAt,
     );
-    wallet.postEntry({
+    await wallet.postEntry({
       walletId: w.id, customerId: customer.id, salonId, type: 'recharge', amount: offer.pay,
       balanceType: 'cash', paymentId: `pay_sim_seed${index}`, referenceId: orderId,
       idempotencyKey: `seed_recharge_cash_${customer.id}`, reason: 'Wallet recharge',
     });
-    wallet.postEntry({
+    await wallet.postEntry({
       walletId: w.id, customerId: customer.id, salonId, type: 'recharge', amount: offer.bonus,
       balanceType: 'bonus', paymentId: `pay_sim_seed${index}`, referenceId: orderId,
       idempotencyKey: `seed_recharge_bonus_${customer.id}`, reason: 'Recharge bonus',
     });
-  });
+  }
 
   /* ---------------- referral codes ---------------- */
   const codes: { customerId: string; code: string }[] = [];
-  customers.forEach((customer, i) => {
+  for (const [i, customer] of customers.entries()) {
     const code = `${customer.name.split(' ')[0]!.toUpperCase().slice(0, 5)}${String(1000 + i)}`;
-    run('INSERT INTO referral_codes (id, salonId, customerId, code, status, createdAt) VALUES (?,?,?,?,?,?)',
+    await run('INSERT INTO referral_codes (id, salonId, customerId, code, status, createdAt) VALUES (?,?,?,?,?,?)',
       crypto.randomUUID(), salonId, customer.id, code, 'active', iso(now));
     codes.push({ customerId: customer.id, code });
-  });
+  }
 
   /* ---------------- history: appointments + service records ---------------- */
   const historyAppointments: { id: string; customerId: string; completedAt: string }[] = [];
@@ -345,7 +432,7 @@ function seedCore() {
     const id = crypto.randomUUID();
     const bookingSource = rand() > 0.75 ? 'walk_in' : 'app';
 
-    run(
+    await run(
       `INSERT INTO appointments (id, salonId, branchId, customerId, staffId, servicesJson, date, startTime, endTime, durationMinutes,
         status, bookingSource, subtotal, discount, totalAmount, paidAmount, paymentStatus, paymentMethod, createdBy, createdAt, updatedAt)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -357,7 +444,7 @@ function seedCore() {
 
     if (!completed) continue;
 
-    run(
+    await run(
       `INSERT INTO service_records (id, appointmentId, customerId, staffId, salonId, branchId, servicesJson, grossAmount, discount,
         finalAmount, paymentMethod, walletAmount, onlineAmount, cashAmount, completedAt, createdAt)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -369,10 +456,10 @@ function seedCore() {
     );
 
     if (method === 'wallet') {
-      const w = wallet.getOrCreateWallet(salonId, customer.id);
-      const b = wallet.balances(w.id);
+      const w = await wallet.getOrCreateWallet(salonId, customer.id);
+      const b = await wallet.balances(w.id);
       if (b.total >= subtotal) {
-        wallet.debit({
+        await wallet.debit({
           walletId: w.id, customerId: customer.id, salonId, amount: subtotal,
           settings, idempotencyKey: `seed_spend_${id}`, referenceId: id, reason: 'Service payment',
         });
@@ -382,7 +469,7 @@ function seedCore() {
   }
 
   /* recompute customer profile aggregates from the records (source of truth) */
-  const aggregates = all<{ customerId: string; visits: number; spend: number; last: string; preferred: string }>(
+  const aggregates = await all<{ customerId: string; visits: number; spend: number; last: string; preferred: string }>(
     `SELECT sr.customerId,
             COUNT(*) AS visits,
             SUM(sr.finalAmount) AS spend,
@@ -394,12 +481,14 @@ function seedCore() {
   for (const agg of aggregates) {
     const preferred = [
       ...new Set(
-        all<{ servicesJson: string }>('SELECT servicesJson FROM service_records WHERE customerId = ?', agg.customerId)
+        (
+          await all<{ servicesJson: string }>('SELECT servicesJson FROM service_records WHERE customerId = ?', agg.customerId)
+        )
           .flatMap((r) => JSON.parse(r.servicesJson) as { serviceId: string }[])
           .map((s) => s.serviceId),
       ),
     ];
-    run(
+    await run(
       'UPDATE customer_profiles SET lastVisitAt = ?, totalVisits = ?, totalCompletedSpend = ?, preferredServices = ? WHERE customerId = ?',
       agg.last, agg.visits, agg.spend, JSON.stringify(preferred), agg.customerId,
     );
@@ -414,11 +503,11 @@ function seedCore() {
     { referrer: customers[3]!, referred: customers[16]!, state: 'registered' },
     { referrer: customers[4]!, referred: customers[18]!, state: 'qualified' },
   ];
-  attribution.forEach((a, index) => {
+  for (const a of attribution) {
     const id = crypto.randomUUID();
     const createdAt = iso(new Date(now.getTime() - randInt(10, 80) * 86400000));
     const rewarded = a.state === 'rewarded';
-    run(
+    await run(
       `INSERT INTO referrals (id, salonId, referrerId, referredCustomerId, referralCode, status, qualifyingAppointmentId,
         referrerRewardStatus, refereeRewardStatus, referrerRewardAmount, refereeRewardAmount, createdAt, qualifiedAt)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -429,25 +518,24 @@ function seedCore() {
       rewarded ? 'credited' : 'pending', rewarded ? 'credited' : 'pending', 5000, 5000, createdAt,
       rewarded ? createdAt : null,
     );
-    if (!rewarded) return;
+    if (!rewarded) continue;
 
     for (const [customerId, kind] of [[a.referrer.id, 'referrer'], [a.referred.id, 'referee']] as const) {
-      const w = wallet.getOrCreateWallet(salonId, customerId);
+      const w = await wallet.getOrCreateWallet(salonId, customerId);
       const key = `referral_${id}_${kind}`;
-      const entry = wallet.postEntry({
+      const entry = await wallet.postEntry({
         walletId: w.id, customerId, salonId, type: 'referral_bonus', amount: 5000,
         balanceType: 'bonus', idempotencyKey: key, referenceId: id,
         reason: kind === 'referrer' ? 'Referral reward — you referred a friend' : 'Referral reward — welcome bonus',
       });
-      run('INSERT INTO reward_transactions (id, customerId, referralId, amount, type, status, walletTransactionId, idempotencyKey, createdAt) VALUES (?,?,?,?,?,?,?,?,?)',
+      await run('INSERT INTO reward_transactions (id, customerId, referralId, amount, type, status, walletTransactionId, idempotencyKey, createdAt) VALUES (?,?,?,?,?,?,?,?,?)',
         crypto.randomUUID(), customerId, id, 5000, kind, 'credited', entry.id, key, createdAt);
     }
-    void index;
-  });
+  }
 
   /* ---------------- notifications history ---------------- */
   const stages = ['day7', 'day14', 'day30'] as const;
-  customers.forEach((customer, index) => {
+  for (const [index, customer] of customers.entries()) {
     const stage = stages[index % 3]!;
     const statuses = ['sent', 'pending', 'failed', 'suppressed', 'sent'] as const;
     const status = statuses[index % statuses.length]!;
@@ -457,7 +545,7 @@ function seedCore() {
         : status === 'failed' ? 'whatsapp_http_470'
           : status === 'suppressed' ? 'customer_opted_out'
             : null;
-    run(
+    await run(
       `INSERT INTO notifications (id, salonId, customerId, channel, template, stage, scheduledAt, sentAt, status, errorDetails, body, reminderKey, attempts, createdAt)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       crypto.randomUUID(), salonId, customer.id, index % 4 === 0 ? 'push' : 'whatsapp', stage, stage,
@@ -465,12 +553,12 @@ function seedCore() {
       `Hello ${customer.name.split(' ')[0]}! It’s time for your next grooming session at SalonPro. Book your preferred time: http://localhost:5173/book`,
       `${customer.id}:seed:${stage}`, status === 'sent' ? 1 : 0, createdAt,
     );
-  });
+  }
 
   /* ---------------- today's calendar ---------------- */
   const today = day(0);
   const times = ['10:00', '11:00', '12:00', '13:00', '15:30', '16:30', '17:30', '18:30'];
-  times.forEach((time, i) => {
+  for (const [i, time] of times.entries()) {
     const customer = customers[i % customers.length]!;
     const staff = staffIds[i % staffIds.length]!;
     const svc = serviceIds[i % serviceIds.length]!;
@@ -478,7 +566,7 @@ function seedCore() {
     const startMin = Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
     const status = i < 2 ? 'completed' : i < 3 ? 'in_progress' : i < 5 ? 'confirmed' : 'booked';
     const id = crypto.randomUUID();
-    run(
+    await run(
       `INSERT INTO appointments (id, salonId, branchId, customerId, staffId, servicesJson, date, startTime, endTime, durationMinutes,
         status, bookingSource, subtotal, discount, totalAmount, paidAmount, paymentStatus, paymentMethod, createdBy, createdAt, updatedAt)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -490,7 +578,7 @@ function seedCore() {
       status === 'completed' ? 'upi_card' : null, ownerId, iso(now), iso(now),
     );
     if (status === 'completed') {
-      run(
+      await run(
         `INSERT INTO service_records (id, appointmentId, customerId, staffId, salonId, branchId, servicesJson, grossAmount, discount,
           finalAmount, paymentMethod, walletAmount, onlineAmount, cashAmount, completedAt, createdAt)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -499,7 +587,7 @@ function seedCore() {
         svc.price, 0, svc.price, 'upi_card', 0, 0, svc.price, iso(now), iso(now),
       );
     }
-  });
+  }
 
   /* ---------------- future bookings ---------------- */
   for (let i = 1; i <= 6; i++) {
@@ -509,7 +597,7 @@ function seedCore() {
     const date = day(i);
     const time = ['11:00', '12:30', '16:00', '17:30'][i % 4]!;
     const startMin = Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
-    run(
+    await run(
       `INSERT INTO appointments (id, salonId, branchId, customerId, staffId, servicesJson, date, startTime, endTime, durationMinutes,
         status, bookingSource, subtotal, discount, totalAmount, paidAmount, paymentStatus, createdBy, createdAt, updatedAt)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -525,21 +613,95 @@ function seedCore() {
     for (let d = 0; d <= 5; d++) {
       const date = day(-d);
       const checkIn = at(date, '09:55');
-      run('INSERT INTO staff_attendance (id, staffId, branchId, date, checkInAt, checkOutAt, status) VALUES (?,?,?,?,?,?,?)',
-        crypto.randomUUID(), staff.id, staff.branchId, date, checkIn, d === 0 ? null : at(date, '20:15'), d === 0 ? 'present' : 'present');
+      await run('INSERT INTO staff_attendance (id, staffId, branchId, date, checkInAt, checkOutAt, status) VALUES (?,?,?,?,?,?,?)',
+        crypto.randomUUID(), staff.id, staff.branchId, date, checkIn, d === 0 ? null : at(date, '20:15'), 'present');
     }
   }
 
   /* ---------------- audit trail sample ---------------- */
-  run('INSERT INTO audit_logs (id, actorId, action, entityType, entityId, meta, ip, timestamp) VALUES (?,?,?,?,?,?,?,?)',
+  await run('INSERT INTO audit_logs (id, actorId, action, entityType, entityId, meta, ip, timestamp) VALUES (?,?,?,?,?,?,?,?)',
     crypto.randomUUID(), ownerId, 'salon.seed', 'salon', salonId, JSON.stringify({ source: 'seeder' }), '127.0.0.1', iso(now));
 
   void newId;
+  void superAdminId;
+  void demoUsers;
   console.log(`· ${customers.length} customers, ${serviceIds.length} services, ${historyAppointments.length} historical visits`);
+}
+
+/* ------------------------------------------------------------------ */
+/* CLI                                                                 */
+/* ------------------------------------------------------------------ */
+
+function argValue(flag: string): string | undefined {
+  const index = process.argv.indexOf(flag);
+  return index >= 0 ? process.argv[index + 1] : undefined;
+}
+
+/**
+ * Values for the bootstrap can come from the command line or the environment.
+ * Environment variables are the reliable route through npm, which swallows
+ * flags it does not recognise:
+ *
+ *   BOOTSTRAP_OWNER_PHONE=98… BOOTSTRAP_OWNER_NAME="Deepa Menon" \
+ *   BOOTSTRAP_SALON_NAME="Blush Studio" npm run bootstrap
+ */
+function bootstrapOptions() {
+  return {
+    phone: argValue('--phone') ?? process.env.BOOTSTRAP_OWNER_PHONE,
+    ownerName: argValue('--owner') ?? process.env.BOOTSTRAP_OWNER_NAME,
+    salonName: argValue('--salon') ?? process.env.BOOTSTRAP_SALON_NAME,
+    address: argValue('--address') ?? process.env.BOOTSTRAP_ADDRESS,
+    contact: argValue('--contact') ?? process.env.BOOTSTRAP_CONTACT,
+    branchName: argValue('--branch') ?? process.env.BOOTSTRAP_BRANCH,
+  };
+}
+
+async function main() {
+  const options = bootstrapOptions();
+
+  if (process.argv.includes('--bootstrap') || process.env.BOOTSTRAP_OWNER_PHONE) {
+    const phone = options.phone;
+    if (!phone) {
+      console.error('· bootstrap needs an owner mobile number (--phone, or BOOTSTRAP_OWNER_PHONE).');
+      process.exitCode = 1;
+      return;
+    }
+    const salonName = options.salonName ?? 'SalonPro';
+    await runBootstrap({
+      ownerName: options.ownerName ?? 'Salon Owner',
+      ownerPhone: phone,
+      salonName,
+      address: options.address ?? 'Address not set — update it in Settings',
+      contact: options.contact,
+      branchName: options.branchName ?? `${salonName} — Main branch`,
+    });
+    return;
+  }
+
+  const reset = process.argv.includes('--reset');
+  if (!(await runSeed(reset))) return;
+  console.log('\n✅ Seed complete.\n');
+  console.log('Demo accounts (development only — password: %s)', DEMO_PASSWORD);
+  console.log('  Super Admin     9999999999');
+  console.log('  Salon Owner     9800000001');
+  console.log('  Branch Manager  9800000002');
+  console.log('  Receptionist    9800000003');
+  console.log('  Stylist         9800000010');
+  console.log('  Customer 1      9700000001   (Aarav Mehta — top spender, has referrals)');
+  console.log('  Customer 2      9700000002   (Priya Sharma — inactive, reminder target)');
+  console.log('');
 }
 
 /* Only run the CLI when this file is executed directly, not when imported
  * (the test harness imports `runSeed`). */
 const invokedDirectly =
   !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (invokedDirectly) main();
+if (invokedDirectly) {
+  main()
+    .then(() => closeDatabase())
+    .catch(async (err) => {
+      console.error(err);
+      await closeDatabase();
+      process.exitCode = 1;
+    });
+}

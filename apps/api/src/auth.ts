@@ -32,13 +32,13 @@ const sha256 = (value: string) => crypto.createHash('sha256').update(value).dige
 /* Rate limiting (DB backed)                                           */
 /* ------------------------------------------------------------------ */
 
-export function recordAttempt(key: string, kind: string) {
-  run('INSERT INTO auth_attempts (id, key, kind, createdAt) VALUES (?,?,?,?)', crypto.randomUUID(), key, kind, new Date().toISOString());
+export async function recordAttempt(key: string, kind: string) {
+  await run('INSERT INTO auth_attempts (id, key, kind, createdAt) VALUES (?,?,?,?)', crypto.randomUUID(), key, kind, new Date().toISOString());
 }
 
-export function assertUnderRateLimit(key: string, kind: string, max: number, windowMinutes: number) {
+export async function assertUnderRateLimit(key: string, kind: string, max: number, windowMinutes: number) {
   const since = new Date(Date.now() - windowMinutes * 60000).toISOString();
-  const row = one<{ n: number }>(
+  const row = await one<{ n: number }>(
     'SELECT COUNT(*) AS n FROM auth_attempts WHERE key = ? AND kind = ? AND createdAt >= ?',
     key,
     kind,
@@ -53,10 +53,10 @@ export function assertUnderRateLimit(key: string, kind: string, max: number, win
 /* Sessions                                                            */
 /* ------------------------------------------------------------------ */
 
-export function createSession(userId: string, req?: Request): string {
+export async function createSession(userId: string, req?: Request): Promise<string> {
   const token = crypto.randomBytes(32).toString('base64url');
   const expiresAt = new Date(Date.now() + env.sessionTtlDays * 86400000).toISOString();
-  run(
+  await run(
     'INSERT INTO sessions (id, userId, tokenHash, expiresAt, userAgent, ip, createdAt) VALUES (?,?,?,?,?,?,?)',
     crypto.randomUUID(),
     userId,
@@ -69,12 +69,12 @@ export function createSession(userId: string, req?: Request): string {
   return token;
 }
 
-export function revokeSession(token: string) {
-  run('UPDATE sessions SET revokedAt = ? WHERE tokenHash = ?', new Date().toISOString(), sha256(token + env.sessionSecret));
+export async function revokeSession(token: string) {
+  await run('UPDATE sessions SET revokedAt = ? WHERE tokenHash = ?', new Date().toISOString(), sha256(token + env.sessionSecret));
 }
 
-export function revokeAllSessions(userId: string) {
-  run('UPDATE sessions SET revokedAt = ? WHERE userId = ? AND revokedAt IS NULL', new Date().toISOString(), userId);
+export async function revokeAllSessions(userId: string) {
+  await run('UPDATE sessions SET revokedAt = ? WHERE userId = ? AND revokedAt IS NULL', new Date().toISOString(), userId);
 }
 
 function staffRowFor(userId: string) {
@@ -85,8 +85,8 @@ function staffRowFor(userId: string) {
   );
 }
 
-export function buildSessionUser(userId: string): SessionUser | null {
-  const user = one<{
+export async function buildSessionUser(userId: string): Promise<SessionUser | null> {
+  const user = await one<{
     id: string;
     name: string;
     phone: string;
@@ -100,36 +100,36 @@ export function buildSessionUser(userId: string): SessionUser | null {
   const branchIds: string[] = [];
 
   if (user.role === 'salon_owner' || user.role === 'super_admin') {
-    const salon = one<{ id: string }>('SELECT id FROM salons WHERE ownerId = ? LIMIT 1', userId);
-    const fallback = salon ?? one<{ id: string }>('SELECT id FROM salons LIMIT 1');
+    const salon = await one<{ id: string }>('SELECT id FROM salons WHERE ownerId = ? LIMIT 1', userId);
+    const fallback = salon ?? (await one<{ id: string }>('SELECT id FROM salons LIMIT 1'));
     salonId = fallback?.id ?? null;
     if (salonId) {
-      for (const b of all<{ id: string }>('SELECT id FROM branches WHERE salonId = ?', salonId)) {
+      for (const b of await all<{ id: string }>('SELECT id FROM branches WHERE salonId = ?', salonId)) {
         branchIds.push(b.id);
       }
     }
   } else if (user.role === 'customer') {
-    const profile = one<{ salonId: string | null }>(
+    const profile = await one<{ salonId: string | null }>(
       'SELECT salonId FROM customer_profiles WHERE customerId = ?',
       userId,
     );
     salonId =
       profile?.salonId ??
-      one<{ id: string }>('SELECT id FROM salons LIMIT 1')?.id ??
+      (await one<{ id: string }>('SELECT id FROM salons LIMIT 1'))?.id ??
       null;
   } else {
-    const staff = staffRowFor(userId);
+    const staff = await staffRowFor(userId);
     if (staff) {
       salonId = staff.salonId;
       if (user.role === 'branch_manager' || user.role === 'receptionist') {
-        const assigned = all<{ branchId: string }>('SELECT branchId FROM user_branches WHERE userId = ?', userId);
+        const assigned = await all<{ branchId: string }>('SELECT branchId FROM user_branches WHERE userId = ?', userId);
         if (assigned.length) assigned.forEach((a) => branchIds.push(a.branchId));
         else branchIds.push(staff.branchId);
       } else {
         branchIds.push(staff.branchId);
       }
     } else {
-      const assigned = all<{ branchId: string; salonId: string }>(
+      const assigned = await all<{ branchId: string; salonId: string }>(
         'SELECT ub.branchId, b.salonId FROM user_branches ub JOIN branches b ON b.id = ub.branchId WHERE ub.userId = ?',
         userId,
       );
@@ -140,7 +140,7 @@ export function buildSessionUser(userId: string): SessionUser | null {
     }
   }
 
-  const staff = staffRowFor(userId);
+  const staff = await staffRowFor(userId);
   return {
     id: user.id,
     name: user.name,
@@ -167,20 +167,20 @@ declare global {
   }
 }
 
-export function requireAuth(req: Request, _res: Response, next: NextFunction) {
+export async function requireAuth(req: Request, _res: Response, next: NextFunction) {
   try {
     const header = req.headers.authorization ?? '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : '';
     if (!token) throw unauthorized();
 
-    const session = one<{ userId: string; expiresAt: string; revokedAt: string | null }>(
+    const session = await one<{ userId: string; expiresAt: string; revokedAt: string | null }>(
       'SELECT userId, expiresAt, revokedAt FROM sessions WHERE tokenHash = ?',
       sha256(token + env.sessionSecret),
     );
     if (!session || session.revokedAt) throw unauthorized('Your session has ended. Please sign in again.');
     if (new Date(session.expiresAt).getTime() < Date.now()) throw unauthorized('Your session has expired.');
 
-    const user = buildSessionUser(session.userId);
+    const user = await buildSessionUser(session.userId);
     if (!user) throw unauthorized('This account is no longer active.');
     req.auth = user;
     req.sessionToken = token;
@@ -250,11 +250,11 @@ export function assertBranchAccess(auth: SessionUser, branchId: string) {
 }
 
 /** The salon a caller may operate on. */
-export function scopedSalonId(auth: SessionUser, requested?: string | null): string {
+export async function scopedSalonId(auth: SessionUser, requested?: string | null): Promise<string> {
   if (auth.role === 'super_admin') {
     if (requested) return requested;
     if (auth.salonId) return auth.salonId;
-    const anySalon = one<{ id: string }>('SELECT id FROM salons LIMIT 1');
+    const anySalon = await one<{ id: string }>('SELECT id FROM salons LIMIT 1');
     if (!anySalon) throw new HttpError(400, 'no_salon', 'No salon exists yet.');
     return anySalon.id;
   }
@@ -266,7 +266,7 @@ export function scopedSalonId(auth: SessionUser, requested?: string | null): str
 /* Audit log                                                           */
 /* ------------------------------------------------------------------ */
 
-export function audit(
+export async function audit(
   actorId: string,
   action: string,
   entityType: string,
@@ -274,7 +274,7 @@ export function audit(
   meta?: Record<string, unknown>,
   ip?: string,
 ) {
-  run(
+  await run(
     'INSERT INTO audit_logs (id, actorId, action, entityType, entityId, meta, ip, timestamp) VALUES (?,?,?,?,?,?,?,?)',
     crypto.randomUUID(),
     actorId,

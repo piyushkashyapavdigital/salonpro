@@ -35,8 +35,8 @@ export interface Balances {
   total: number;
 }
 
-export function getOrCreateWallet(salonId: string, customerId: string) {
-  const existing = one<{ id: string; status: string; createdAt: string }>(
+export async function getOrCreateWallet(salonId: string, customerId: string) {
+  const existing = await one<{ id: string; status: string; createdAt: string }>(
     'SELECT id, status, createdAt FROM wallets WHERE salonId = ? AND customerId = ?',
     salonId,
     customerId,
@@ -44,7 +44,7 @@ export function getOrCreateWallet(salonId: string, customerId: string) {
   if (existing) return existing;
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  run(
+  await run(
     'INSERT INTO wallets (id, salonId, customerId, status, createdAt) VALUES (?,?,?,?,?)',
     id,
     salonId,
@@ -56,8 +56,8 @@ export function getOrCreateWallet(salonId: string, customerId: string) {
 }
 
 /** Balances are always derived from the ledger. */
-export function balances(walletId: string): Balances {
-  const rows = all<{ balanceType: BalanceType; total: number }>(
+export async function balances(walletId: string): Promise<Balances> {
+  const rows = await all<{ balanceType: BalanceType; total: number }>(
     `SELECT balanceType, COALESCE(SUM(amount), 0) AS total
        FROM wallet_transactions
       WHERE walletId = ? AND status = 'posted'
@@ -69,9 +69,9 @@ export function balances(walletId: string): Balances {
   return { cash, bonus, total: cash + bonus };
 }
 
-export function walletView(salonId: string, customerId: string): Wallet {
-  const w = getOrCreateWallet(salonId, customerId);
-  const b = balances(w.id);
+export async function walletView(salonId: string, customerId: string): Promise<Wallet> {
+  const w = await getOrCreateWallet(salonId, customerId);
+  const b = await balances(w.id);
   return {
     id: w.id,
     salonId,
@@ -84,15 +84,15 @@ export function walletView(salonId: string, customerId: string): Wallet {
   };
 }
 
-export function ledger(walletId: string, limit = 200): LedgerRow[] {
+export function ledger(walletId: string, limit = 200): Promise<LedgerRow[]> {
   return all<LedgerRow>(
-    'SELECT * FROM wallet_transactions WHERE walletId = ? ORDER BY createdAt DESC, rowid DESC LIMIT ?',
+    'SELECT * FROM wallet_transactions WHERE walletId = ? ORDER BY createdAt DESC, id DESC LIMIT ?',
     walletId,
     limit,
   );
 }
 
-export function transactionByIdempotencyKey(key: string): LedgerRow | undefined {
+export function transactionByIdempotencyKey(key: string): Promise<LedgerRow | undefined> {
   return one<LedgerRow>('SELECT * FROM wallet_transactions WHERE idempotencyKey = ?', key);
 }
 
@@ -114,14 +114,14 @@ interface PostArgs {
  * Post a single ledger entry. Idempotent on `idempotencyKey`: replaying the same
  * key returns the original row and never double-credits.
  */
-export function postEntry(args: PostArgs): LedgerRow {
-  return tx(() => {
-    const existing = transactionByIdempotencyKey(args.idempotencyKey);
+export function postEntry(args: PostArgs): Promise<LedgerRow> {
+  return tx(async () => {
+    const existing = await transactionByIdempotencyKey(args.idempotencyKey);
     if (existing) return existing;
     if (args.amount === 0) throw badRequest('A ledger entry cannot be for zero.');
     const id = crypto.randomUUID();
     const createdAt = new Date().toISOString();
-    run(
+    await run(
       `INSERT INTO wallet_transactions
          (id, walletId, customerId, salonId, type, amount, balanceType, paymentId, referenceId, idempotencyKey, status, reason, actorId, createdAt)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -140,7 +140,7 @@ export function postEntry(args: PostArgs): LedgerRow {
       args.actorId ?? null,
       createdAt,
     );
-    return one<LedgerRow>('SELECT * FROM wallet_transactions WHERE id = ?', id)!;
+    return (await one<LedgerRow>('SELECT * FROM wallet_transactions WHERE id = ?', id))!;
   });
 }
 
@@ -172,13 +172,13 @@ export function debit(args: {
   reason?: string | null;
   type?: WalletTransactionType;
 }) {
-  return tx(() => {
+  return tx(async () => {
     const amount = Math.round(args.amount);
     if (amount <= 0) throw badRequest('A debit must be for a positive amount.');
 
-    const replay = transactionByIdempotencyKey(`${args.idempotencyKey}:0`);
+    const replay = await transactionByIdempotencyKey(`${args.idempotencyKey}:0`);
     if (replay) {
-      const rows = all<LedgerRow>(
+      const rows = await all<LedgerRow>(
         'SELECT * FROM wallet_transactions WHERE idempotencyKey LIKE ? ORDER BY idempotencyKey',
         `${args.idempotencyKey}:%`,
       );
@@ -189,7 +189,7 @@ export function debit(args: {
       };
     }
 
-    const b = balances(args.walletId);
+    const b = await balances(args.walletId);
     if (b.total < amount) {
       throw conflict('Insufficient wallet balance.', {
         required: amount,
@@ -209,7 +209,7 @@ export function debit(args: {
       if (available <= 0) continue;
       const take = Math.min(available, remaining);
       entries.push(
-        postEntry({
+        await postEntry({
           walletId: args.walletId,
           customerId: args.customerId,
           salonId: args.salonId,
@@ -234,10 +234,10 @@ export function debit(args: {
 
 /** Reverse a specific ledger entry with a compensating row (append-only). */
 export function reverseEntry(entryId: string, reason: string, actorId: string, idempotencyKey: string) {
-  return tx(() => {
-    const entry = one<LedgerRow>('SELECT * FROM wallet_transactions WHERE id = ?', entryId);
+  return tx(async () => {
+    const entry = await one<LedgerRow>('SELECT * FROM wallet_transactions WHERE id = ?', entryId);
     if (!entry) throw notFound('Ledger entry not found.');
-    const reversal = postEntry({
+    const reversal = await postEntry({
       walletId: entry.walletId,
       customerId: entry.customerId,
       salonId: entry.salonId,
@@ -249,13 +249,13 @@ export function reverseEntry(entryId: string, reason: string, actorId: string, i
       reason,
       actorId,
     });
-    run('UPDATE wallet_transactions SET status = ? WHERE id = ?', 'reversed', entry.id);
+    await run('UPDATE wallet_transactions SET status = ? WHERE id = ?', 'reversed', entry.id);
     return reversal;
   });
 }
 
 /** Manual adjustment — owner/super-admin only, requires a reason. */
-export function adjust(args: {
+export async function adjust(args: {
   walletId: string;
   customerId: string;
   salonId: string;
@@ -269,7 +269,7 @@ export function adjust(args: {
     throw badRequest('A reason is required for a manual wallet adjustment.');
   }
   if (args.amount < 0) {
-    const b = balances(args.walletId);
+    const b = await balances(args.walletId);
     const available = args.balanceType === 'bonus' ? b.bonus : b.cash;
     if (available + args.amount < 0) throw conflict('Adjustment would create a negative balance.');
   }
@@ -287,8 +287,8 @@ export function adjust(args: {
 }
 
 /** Total outstanding wallet liability for the salon (owner reporting). */
-export function liabilities(salonId: string, from?: string) {
-  const rows = all<{ balanceType: BalanceType; total: number }>(
+export async function liabilities(salonId: string, from?: string) {
+  const rows = await all<{ balanceType: BalanceType; total: number }>(
     `SELECT balanceType, COALESCE(SUM(amount), 0) AS total
        FROM wallet_transactions
       WHERE salonId = ? AND status = 'posted' ${from ? 'AND createdAt >= ?' : ''}

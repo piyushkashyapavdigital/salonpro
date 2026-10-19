@@ -1,11 +1,13 @@
 import { useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { MotionConfig } from 'framer-motion';
 import { ADMIN_ROLES } from '@salonpro/shared';
 import { useAuth } from './lib/auth';
 import { isAdminApp } from './lib/mode';
 import { initBackButton, initNativeChrome, isNative } from './lib/native';
 import { useToast } from './components/Toast';
 import { AdminShell, CustomerShell } from './components/layout';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { EmptyState, Spinner } from './components/ui';
 
 import Landing from './pages/Landing';
@@ -40,6 +42,15 @@ function FullPageSpinner() {
       <Spinner size={26} />
     </div>
   );
+}
+
+/**
+ * Every Framer Motion animation in the app (dock pills, meteors, number
+ * tickers) honours the OS "reduce motion" setting — `reducedMotion="user"`
+ * makes them resolve instantly into their final state instead of moving.
+ */
+function MotionRoot({ children }: { children: React.ReactNode }) {
+  return <MotionConfig reducedMotion="user">{children}</MotionConfig>;
 }
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -128,23 +139,27 @@ export default function App() {
   // ------------------------------------------------------------------
   if (isAdminApp) {
     return (
-      <Routes>
-        <Route path="/login" element={user ? <Navigate to="/admin" replace /> : <Login />} />
-        <Route
-          path="/admin"
-          element={
-            <RequireAdmin>
-              <AdminShell />
-            </RequireAdmin>
-          }
-        >
-          {ADMIN_CHILDREN}
-        </Route>
-        <Route
-          path="*"
-          element={loading ? <FullPageSpinner /> : <Navigate to={user ? '/admin' : '/login'} replace />}
-        />
-      </Routes>
+      <ErrorBoundary>
+        <MotionRoot>
+          <Routes>
+            <Route path="/login" element={user ? <Navigate to="/admin" replace /> : <Login />} />
+            <Route
+              path="/admin"
+              element={
+                <RequireAdmin>
+                  <AdminShell />
+                </RequireAdmin>
+              }
+            >
+              {ADMIN_CHILDREN}
+            </Route>
+            <Route
+              path="*"
+              element={loading ? <FullPageSpinner /> : <Navigate to={user ? '/admin' : '/login'} replace />}
+            />
+          </Routes>
+        </MotionRoot>
+      </ErrorBoundary>
     );
   }
 
@@ -156,55 +171,59 @@ export default function App() {
   const homeFor = (role?: string) => (role === 'customer' ? '/app' : '/admin');
 
   return (
-    <Routes>
-      <Route
-        path="/"
-        element={
-          loading ? (
-            <FullPageSpinner />
-          ) : user ? (
-            <Navigate to={homeFor(user.role)} replace />
-          ) : nativeBoot ? (
-            <Navigate to="/login" replace />
-          ) : (
-            <Landing />
-          )
-        }
-      />
-      <Route path="/join/:code" element={<Landing />} />
-      <Route path="/login" element={user ? <Navigate to={homeFor(user.role)} replace /> : <Login />} />
+    <ErrorBoundary>
+      <MotionRoot>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              loading ? (
+                <FullPageSpinner />
+              ) : user ? (
+                <Navigate to={homeFor(user.role)} replace />
+              ) : nativeBoot ? (
+                <Navigate to="/login" replace />
+              ) : (
+                <Landing />
+              )
+            }
+          />
+          <Route path="/join/:code" element={<Landing />} />
+          <Route path="/login" element={user ? <Navigate to={homeFor(user.role)} replace /> : <Login />} />
 
-      <Route
-        path="/app"
-        element={
-          <RequireAuth>
-            <CustomerShell />
-          </RequireAuth>
-        }
-      >
-        <Route index element={<Home />} />
-        <Route path="services" element={<Services />} />
-        <Route path="book" element={<Book />} />
-        <Route path="bookings" element={<Bookings />} />
-        <Route path="wallet" element={<WalletPage />} />
-        <Route path="referrals" element={<Referrals />} />
-        <Route path="offers" element={<Offers />} />
-        <Route path="notifications" element={<Notifications />} />
-        <Route path="profile" element={<Profile />} />
-      </Route>
+          <Route
+            path="/app"
+            element={
+              <RequireAuth>
+                <CustomerShell />
+              </RequireAuth>
+            }
+          >
+            <Route index element={<Home />} />
+            <Route path="services" element={<Services />} />
+            <Route path="book" element={<Book />} />
+            <Route path="bookings" element={<Bookings />} />
+            <Route path="wallet" element={<WalletPage />} />
+            <Route path="referrals" element={<Referrals />} />
+            <Route path="offers" element={<Offers />} />
+            <Route path="notifications" element={<Notifications />} />
+            <Route path="profile" element={<Profile />} />
+          </Route>
 
-      <Route
-        path="/admin"
-        element={
-          <RequireAdmin>
-            <AdminShell />
-          </RequireAdmin>
-        }
-      >
-        {ADMIN_CHILDREN}
-      </Route>
+          <Route
+            path="/admin"
+            element={
+              <RequireAdmin>
+                <AdminShell />
+              </RequireAdmin>
+            }
+          >
+            {ADMIN_CHILDREN}
+          </Route>
 
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </MotionRoot>
+    </ErrorBoundary>
   );
 }

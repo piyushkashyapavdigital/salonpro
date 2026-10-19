@@ -81,7 +81,7 @@ test('a repeated booking idempotency key does not double-book', async () => {
   assert.equal(first.status, 201);
   assert.equal(second.status, 201);
   assert.equal(second.data.appointment.id, first.data.appointment.id, 'same appointment returned');
-  const count = h.db.scalar<number>(
+  const count = await h.db.scalar<number>(
     'SELECT COUNT(*) FROM appointments WHERE customerId = (SELECT id FROM users WHERE phone = ?) AND date = ?',
     ACCOUNTS.customer1,
     date,
@@ -140,11 +140,11 @@ test('completing a visit writes a service record and stamps the profile', async 
   assert.equal(done.data.appointment.status, 'completed');
   assert.equal(done.data.appointment.paymentStatus, 'paid');
 
-  const record = h.db.one('SELECT * FROM service_records WHERE appointmentId = ?', id);
+  const record = await h.db.one('SELECT * FROM service_records WHERE appointmentId = ?', id);
   assert.ok(record, 'a service record is written exactly once');
   assert.equal(record.finalAmount, service.price);
 
-  const profile = h.db.one(
+  const profile = await h.db.one(
     'SELECT totalVisits FROM customer_profiles WHERE customerId = (SELECT id FROM users WHERE phone = ?)',
     ACCOUNTS.customer1,
   );
@@ -152,7 +152,7 @@ test('completing a visit writes a service record and stamps the profile', async 
 });
 
 test('a customer cannot read another customer\'s booking (row-level security)', async () => {
-  const owner = h.db.one<{ id: string }>(
+  const owner = await h.db.one<{ id: string }>(
     'SELECT id FROM appointments WHERE customerId = (SELECT id FROM users WHERE phone = ?) LIMIT 1',
     ACCOUNTS.customer1,
   );

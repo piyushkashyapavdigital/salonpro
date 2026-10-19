@@ -83,7 +83,7 @@ test('a new customer arriving on a referral link is attributed, not yet rewarded
   assert.equal(registered.status, 200);
   const newId = registered.data.user.id;
 
-  const row = h.db.one<{ status: string; referredCustomerId: string }>('SELECT * FROM referrals WHERE referredCustomerId = ?', newId);
+  const row = await h.db.one<{ status: string; referredCustomerId: string }>('SELECT * FROM referrals WHERE referredCustomerId = ?', newId);
   assert.ok(row, 'the referral is recorded');
   assert.equal(row.status, 'registered');
 
@@ -93,7 +93,7 @@ test('a new customer arriving on a referral link is attributed, not yet rewarded
 
 test('an invalid referral token attributes nobody', async () => {
   const registered = await registerWithReferral('9811111002', 'not-a-signed-token', 'No Referral');
-  const row = h.db.one('SELECT id FROM referrals WHERE referredCustomerId = ?', registered.data.user.id);
+  const row = await h.db.one('SELECT id FROM referrals WHERE referredCustomerId = ?', registered.data.user.id);
   assert.equal(row, undefined);
 });
 
@@ -101,9 +101,9 @@ test('the referral service refuses a self-referral', async () => {
   const referrer = await customerToken();
   const token = await referralTokenOf(referrer);
   const referralService = await import('../src/services/referral');
-  const cid = h.db.one<{ id: string }>('SELECT id FROM users WHERE phone = ?', ACCOUNTS.customer1)!.id;
-  const salonId = h.db.one<{ id: string }>('SELECT id FROM salons LIMIT 1')!.id;
-  const result = referralService.resolveAttribution(cid, salonId, token);
+  const cid = (await h.db.one<{ id: string }>('SELECT id FROM users WHERE phone = ?', ACCOUNTS.customer1))!.id;
+  const salonId = (await h.db.one<{ id: string }>('SELECT id FROM salons LIMIT 1'))!.id;
+  const result = await referralService.resolveAttribution(cid, salonId, token);
   assert.equal(result, null, 'a customer cannot refer themselves');
 });
 
@@ -122,10 +122,10 @@ test('rewards are credited ₹50 + ₹50 exactly once, after the first completed
   const referrerDash = await h.get<{ creditedRewards: number }>('/customer/referrals', referrer);
   assert.ok(referrerDash.data.creditedRewards >= REFERRAL_REWARD, 'the referrer earns ₹50');
 
-  const referral = h.db.one<{ id: string; status: string }>('SELECT * FROM referrals WHERE referredCustomerId = ?', newId);
+  const referral = await h.db.one<{ id: string; status: string }>('SELECT * FROM referrals WHERE referredCustomerId = ?', newId);
   assert.equal(referral!.status, 'rewarded');
 
-  const rewards = h.db.all('SELECT * FROM reward_transactions WHERE referralId = ?', referral!.id);
+  const rewards = await h.db.all('SELECT * FROM reward_transactions WHERE referralId = ?', referral!.id);
   const credited = rewards.filter((r) => r.status === 'credited');
   assert.equal(credited.length, 2, 'exactly one referrer reward and one referee reward');
 });
@@ -135,13 +135,13 @@ test('completing the qualifier a second time does not re-reward', async () => {
   const token = await referralTokenOf(referrer);
   const registered = await registerWithReferral('9811111004', token, 'Repeat Caller');
   const appointmentId = await bookAndComplete(registered.data.token);
-  const before = h.db.scalar<number>(
+  const before = await h.db.scalar<number>(
     "SELECT COUNT(*) FROM reward_transactions WHERE referralId IN (SELECT id FROM referrals WHERE referredCustomerId = ?) AND status='credited'",
     registered.data.user.id,
   );
   const referralService = await import('../src/services/referral');
-  referralService.qualifyForAppointment(appointmentId); // idempotent re-run
-  const after = h.db.scalar<number>(
+  await referralService.qualifyForAppointment(appointmentId); // idempotent re-run
+  const after = await h.db.scalar<number>(
     "SELECT COUNT(*) FROM reward_transactions WHERE referralId IN (SELECT id FROM referrals WHERE referredCustomerId = ?) AND status='credited'",
     registered.data.user.id,
   );
@@ -163,9 +163,9 @@ test('refunding the qualifying visit reverses the rewards with compensating entr
   );
   assert.equal(refund.status, 200);
 
-  const referral = h.db.one<{ status: string }>('SELECT * FROM referrals WHERE referredCustomerId = ?', registered.data.user.id);
+  const referral = await h.db.one<{ status: string }>('SELECT * FROM referrals WHERE referredCustomerId = ?', registered.data.user.id);
   assert.equal(referral!.status, 'reversed');
-  const reversal = h.db.one(
+  const reversal = await h.db.one(
     "SELECT id FROM wallet_transactions WHERE type = 'reversal' LIMIT 1",
   );
   assert.ok(reversal, 'a compensating reversal entry exists');
@@ -176,13 +176,13 @@ test('a customer with prior visits cannot be attributed as a referral', async ()
   const token = await referralTokenOf(referrer);
   /* Customer 1 already has service history, so a token resolves to nobody new. */
   const referralService = await import('../src/services/referral');
-  const salonId = h.db.one<{ id: string }>('SELECT id FROM salons LIMIT 1')!.id;
-  const other = h.db.one<{ id: string }>(
+  const salonId = (await h.db.one<{ id: string }>('SELECT id FROM salons LIMIT 1'))!.id;
+  const other = (await h.db.one<{ id: string }>(
     'SELECT id FROM users WHERE phone = ?',
     ACCOUNTS.customer2,
-  )!.id;
-  const hadVisits = h.db.scalar<number>('SELECT COUNT(*) FROM service_records WHERE customerId = ?', other);
-  const result = referralService.resolveAttribution(other, salonId, token);
+  ))!.id;
+  const hadVisits = await h.db.scalar<number>('SELECT COUNT(*) FROM service_records WHERE customerId = ?', other);
+  const result = await referralService.resolveAttribution(other, salonId, token);
   if (hadVisits > 0) {
     assert.equal(result, null, 'existing visitors are not attributable');
   } else {

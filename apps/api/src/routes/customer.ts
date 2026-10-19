@@ -33,19 +33,21 @@ function customerId(req: { auth?: { id: string; role: string } }): string {
 customerRouter.get(
   '/home',
   requireAuth,
-  handler((req, res) => {
-    const salonId = scopedSalonId(req.auth!);
+  handler(async (req, res) => {
+    const salonId = await scopedSalonId(req.auth!);
     const cid = customerId(req);
-    const profile = customerProfile(salonId, cid);
-    const wallet = walletView(salonId, cid);
-    const settings = readSettings(one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId)?.settings);
+    const profile = await customerProfile(salonId, cid);
+    const wallet = await walletView(salonId, cid);
+    const settings = readSettings(
+      (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId))?.settings,
+    );
 
-    const upcoming = upcomingForCustomer(cid);
-    const recentPayments = all(
+    const upcoming = await upcomingForCustomer(cid);
+    const recentPayments = await all(
       'SELECT * FROM payment_orders WHERE customerId = ? ORDER BY createdAt DESC LIMIT 3',
       cid,
     );
-    const popular = all(
+    const popular = await all(
       `SELECT s.*, COUNT(sr.id) AS bookings
          FROM services s
          LEFT JOIN service_records sr ON sr.servicesJson LIKE '%' || s.id || '%'
@@ -53,22 +55,26 @@ customerRouter.get(
         GROUP BY s.id ORDER BY bookings DESC, s.sortOrder LIMIT 6`,
       salonId,
     );
-    const offers = all(
+    const offers = await all(
       'SELECT * FROM coupons WHERE salonId = ? AND active = 1 AND endAt >= ? ORDER BY endAt LIMIT 3',
       salonId,
       new Date().toISOString(),
     );
-    const loyalty = one<{ points: number; lifetimePoints: number }>(
+    const loyalty = await one<{ points: number; lifetimePoints: number }>(
       'SELECT points, lifetimePoints FROM loyalty_accounts WHERE customerId = ?',
       cid,
     );
-    const referral = one<{ code: string }>('SELECT code FROM referral_codes WHERE customerId = ? AND salonId = ?', cid, salonId);
-    const rewards = scalar<number>(
+    const referral = await one<{ code: string }>(
+      'SELECT code FROM referral_codes WHERE customerId = ? AND salonId = ?',
+      cid,
+      salonId,
+    );
+    const rewards = await scalar<number>(
       "SELECT COALESCE(SUM(amount),0) FROM reward_transactions WHERE customerId = ? AND status = 'credited' AND type <> 'reversal'",
       cid,
     );
-    const visitsThisMonth = scalar<number>(
-      "SELECT COUNT(*) FROM service_records WHERE customerId = ? AND completedAt >= date('now','start of month')",
+    const visitsThisMonth = await scalar<number>(
+      "SELECT COUNT(*) FROM service_records WHERE customerId = ? AND completedAt >= to_char(date_trunc('month', CURRENT_DATE), 'YYYY-MM-DD')",
       cid,
     );
 
@@ -81,7 +87,7 @@ customerRouter.get(
       popular: popular.map((s) => ({ ...s, active: !!s.active })),
       offers,
       referral: {
-        code: referral?.code ?? (ensureReferralCode(salonId, cid).code),
+        code: referral?.code ?? (await ensureReferralCode(salonId, cid)).code,
         rewardsEarned: rewards,
       },
       recentPayments,
@@ -100,10 +106,10 @@ customerRouter.get(
 customerRouter.post(
   '/bookings',
   requireAuth,
-  handler((req, res) => {
+  handler(async (req, res) => {
     const body = bookingCreateSchema.parse(req.body);
-    const salonId = scopedSalonId(req.auth!);
-    const result = createBooking({
+    const salonId = await scopedSalonId(req.auth!);
+    const result = await createBooking({
       auth: req.auth!,
       salonId,
       branchId: body.branchId,
@@ -123,7 +129,7 @@ customerRouter.post(
       appointment: result.appointment,
       paymentPreference: body.paymentPreference ?? 'pay_at_salon',
       walletDebit: result.walletDebit,
-      wallet: walletView(salonId, customerId(req)),
+      wallet: await walletView(salonId, customerId(req)),
     });
   }),
 );
@@ -131,21 +137,23 @@ customerRouter.post(
 customerRouter.get(
   '/bookings',
   requireAuth,
-  handler((req, res) => {
+  handler(async (req, res) => {
     const status = req.query.status ? String(req.query.status) : undefined;
-    const rows = all(
+    const rows = await all(
       `SELECT * FROM appointments WHERE customerId = ? ${status ? 'AND status = ?' : ''} ORDER BY date DESC, startTime DESC LIMIT 100`,
       ...(status ? [customerId(req), status] : [customerId(req)]),
     );
-    res.json({ appointments: rows.map(hydrateAppointment) });
+    const appointments = [];
+    for (const row of rows) appointments.push(await hydrateAppointment(row));
+    res.json({ appointments });
   }),
 );
 
 customerRouter.get(
   '/bookings/:id',
   requireAuth,
-  handler((req, res) => {
-    const appt = getAppointment(req.params.id!);
+  handler(async (req, res) => {
+    const appt = await getAppointment(req.params.id!);
     if (!appt) throw notFound('Booking not found.');
     /* Row level security: a customer can only read their own booking. */
     if (appt.customerId !== req.auth!.id && req.auth!.role === 'customer') throw forbidden();
@@ -156,15 +164,15 @@ customerRouter.get(
 customerRouter.post(
   '/bookings/:id/cancel',
   requireAuth,
-  handler((req, res) => {
+  handler(async (req, res) => {
     const body = z.object({ reason: z.string().max(300).optional() }).parse(req.body ?? {});
-    const appt = getAppointment(req.params.id!);
+    const appt = await getAppointment(req.params.id!);
     if (!appt) throw notFound('Booking not found.');
     if (appt.customerId !== req.auth!.id && req.auth!.role === 'customer') throw forbidden();
     if (!['booked', 'confirmed'].includes(appt.status)) {
       throw badRequest('Only a booked or confirmed appointment can be cancelled.');
     }
-    const updated = changeStatus({
+    const updated = await changeStatus({
       auth: req.auth!,
       appointmentId: appt.id,
       status: 'cancelled',
@@ -177,7 +185,7 @@ customerRouter.post(
 customerRouter.post(
   '/bookings/:id/reschedule',
   requireAuth,
-  handler((req, res) => {
+  handler(async (req, res) => {
     const body = z
       .object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -185,7 +193,7 @@ customerRouter.post(
         staffId: z.string().optional(),
       })
       .parse(req.body);
-    const appt = getAppointment(req.params.id!);
+    const appt = await getAppointment(req.params.id!);
     if (!appt) throw notFound('Booking not found.');
     if (appt.customerId !== req.auth!.id && req.auth!.role === 'customer') throw forbidden();
     if (['completed', 'cancelled'].includes(appt.status)) {
@@ -194,10 +202,10 @@ customerRouter.post(
 
     const start = timeToMinutes(body.startTime);
     const end = start + appt.durationMinutes;
-    const staffId = pickAvailableStaff(appt.branchId, body.date, start, end, body.staffId ?? appt.staffId);
+    const staffId = await pickAvailableStaff(appt.branchId, body.date, start, end, body.staffId ?? appt.staffId);
     if (!staffId) throw conflict('That time is not available for the selected stylist.');
 
-    run(
+    await run(
       'UPDATE appointments SET date = ?, startTime = ?, endTime = ?, staffId = ?, updatedAt = ? WHERE id = ?',
       body.date,
       body.startTime,
@@ -206,8 +214,8 @@ customerRouter.post(
       new Date().toISOString(),
       appt.id,
     );
-    audit(req.auth!.id, 'appointment.reschedule', 'appointment', appt.id, { date: body.date, startTime: body.startTime }, req.ip);
-    res.json({ appointment: getAppointment(appt.id) });
+    await audit(req.auth!.id, 'appointment.reschedule', 'appointment', appt.id, { date: body.date, startTime: body.startTime }, req.ip);
+    res.json({ appointment: await getAppointment(appt.id) });
   }),
 );
 
@@ -218,14 +226,17 @@ customerRouter.post(
 customerRouter.get(
   '/wallet',
   requireAuth,
-  handler((req, res) => {
-    const salonId = scopedSalonId(req.auth!);
+  handler(async (req, res) => {
+    const salonId = await scopedSalonId(req.auth!);
     const cid = customerId(req);
-    const wallet = walletView(salonId, cid);
-    const rows = ledger(wallet.id, 100).map(toWalletTransaction);
-    const settings = readSettings(one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId)?.settings);
-    const offers = all('SELECT * FROM recharge_offers WHERE salonId = ? AND active = 1 ORDER BY sortOrder', salonId)
-      .map((o) => ({ ...o, totalValue: o.payAmount + o.bonusAmount }));
+    const wallet = await walletView(salonId, cid);
+    const rows = (await ledger(wallet.id, 100)).map(toWalletTransaction);
+    const settings = readSettings(
+      (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId))?.settings,
+    );
+    const offers = (
+      await all('SELECT * FROM recharge_offers WHERE salonId = ? AND active = 1 ORDER BY sortOrder', salonId)
+    ).map((o) => ({ ...o, totalValue: o.payAmount + o.bonusAmount }));
     res.json({
       wallet,
       transactions: rows,
@@ -245,19 +256,19 @@ customerRouter.get(
 customerRouter.get(
   '/wallet/receipt/:transactionId',
   requireAuth,
-  handler((req, res) => {
-    const salonId = scopedSalonId(req.auth!);
-    const row = one(
+  handler(async (req, res) => {
+    const salonId = await scopedSalonId(req.auth!);
+    const row = await one(
       'SELECT * FROM wallet_transactions WHERE id = ? AND customerId = ?',
       req.params.transactionId!,
       customerId(req),
     );
     if (!row) throw notFound('Transaction not found.');
     const order = row.paymentId
-      ? one('SELECT * FROM payment_orders WHERE paymentId = ? OR id = ?', row.paymentId, row.referenceId ?? '')
+      ? await one('SELECT * FROM payment_orders WHERE paymentId = ? OR id = ?', row.paymentId, row.referenceId ?? '')
       : null;
-    const salon = one<{ name: string; address: string }>('SELECT name, address FROM salons WHERE id = ?', salonId);
-    const user = one<{ name: string; phone: string }>('SELECT name, phone FROM users WHERE id = ?', customerId(req));
+    const salon = await one<{ name: string; address: string }>('SELECT name, address FROM salons WHERE id = ?', salonId);
+    const user = await one<{ name: string; phone: string }>('SELECT name, phone FROM users WHERE id = ?', customerId(req));
     res.json({
       receipt: {
         number: `SP-${String(row.id).slice(0, 8).toUpperCase()}`,
@@ -278,10 +289,10 @@ customerRouter.get(
 customerRouter.get(
   '/wallet/transactions.csv',
   requireAuth,
-  handler((req, res) => {
-    const salonId = scopedSalonId(req.auth!);
-    const wallet = walletView(salonId, customerId(req));
-    const rows = ledger(wallet.id, 1000);
+  handler(async (req, res) => {
+    const salonId = await scopedSalonId(req.auth!);
+    const wallet = await walletView(salonId, customerId(req));
+    const rows = await ledger(wallet.id, 1000);
     const header = 'date,type,balance_type,amount_inr,status,reference,reason\n';
     const csv = rows
       .map((r) =>
@@ -301,10 +312,12 @@ customerRouter.get(
 customerRouter.get(
   '/referrals',
   requireAuth,
-  handler((req, res) => {
-    const salonId = scopedSalonId(req.auth!);
-    const data = referralDashboard(customerId(req), salonId);
-    const settings = readSettings(one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId)?.settings);
+  handler(async (req, res) => {
+    const salonId = await scopedSalonId(req.auth!);
+    const data = await referralDashboard(customerId(req), salonId);
+    const settings = readSettings(
+      (await one<{ settings: string }>('SELECT settings FROM salons WHERE id = ?', salonId))?.settings,
+    );
     res.json({
       ...data,
       link: `${req.protocol}://${req.get('host')}`.replace(/:\d+$/, ':5173') + `/join/${data.code}`,
@@ -327,12 +340,12 @@ customerRouter.get(
 customerRouter.get(
   '/offers',
   requireAuth,
-  handler((req, res) => {
-    const salonId = scopedSalonId(req.auth!);
+  handler(async (req, res) => {
+    const salonId = await scopedSalonId(req.auth!);
     const now = new Date().toISOString();
-    const coupons = all('SELECT * FROM coupons WHERE salonId = ? AND active = 1 AND endAt >= ?', salonId, now);
-    const offers = all('SELECT * FROM recharge_offers WHERE salonId = ? AND active = 1 ORDER BY sortOrder', salonId);
-    const loyalty = one('SELECT * FROM loyalty_accounts WHERE customerId = ?', customerId(req)) ?? {
+    const coupons = await all('SELECT * FROM coupons WHERE salonId = ? AND active = 1 AND endAt >= ?', salonId, now);
+    const offers = await all('SELECT * FROM recharge_offers WHERE salonId = ? AND active = 1 ORDER BY sortOrder', salonId);
+    const loyalty = (await one('SELECT * FROM loyalty_accounts WHERE customerId = ?', customerId(req))) ?? {
       points: 0,
       lifetimePoints: 0,
     };
@@ -347,11 +360,11 @@ customerRouter.get(
 customerRouter.get(
   '/profile',
   requireAuth,
-  handler((req, res) => {
-    const salonId = scopedSalonId(req.auth!);
-    const profile = customerProfile(salonId, customerId(req));
-    const prefs = preferences(customerId(req));
-    const user = one('SELECT id, name, phone, email, createdAt FROM users WHERE id = ?', customerId(req));
+  handler(async (req, res) => {
+    const salonId = await scopedSalonId(req.auth!);
+    const profile = await customerProfile(salonId, customerId(req));
+    const prefs = await preferences(customerId(req));
+    const user = await one('SELECT id, name, phone, email, createdAt FROM users WHERE id = ?', customerId(req));
     res.json({ user, profile, preferences: prefs });
   }),
 );
@@ -359,7 +372,7 @@ customerRouter.get(
 customerRouter.patch(
   '/profile',
   requireAuth,
-  handler((req, res) => {
+  handler(async (req, res) => {
     const body = z
       .object({
         name: z.string().trim().min(2).max(80).optional(),
@@ -368,20 +381,20 @@ customerRouter.patch(
       })
       .parse(req.body);
     const now = new Date().toISOString();
-    if (body.name) run('UPDATE users SET name = ?, updatedAt = ? WHERE id = ?', body.name, now, customerId(req));
-    if (body.email !== undefined) run('UPDATE users SET email = ?, updatedAt = ? WHERE id = ?', body.email, now, customerId(req));
+    if (body.name) await run('UPDATE users SET name = ?, updatedAt = ? WHERE id = ?', body.name, now, customerId(req));
+    if (body.email !== undefined) await run('UPDATE users SET email = ?, updatedAt = ? WHERE id = ?', body.email, now, customerId(req));
     if (body.birthday !== undefined) {
-      run('UPDATE customer_profiles SET birthday = ? WHERE customerId = ?', body.birthday, customerId(req));
+      await run('UPDATE customer_profiles SET birthday = ? WHERE customerId = ?', body.birthday, customerId(req));
     }
-    const salonId = scopedSalonId(req.auth!);
-    res.json({ profile: customerProfile(salonId, customerId(req)) });
+    const salonId = await scopedSalonId(req.auth!);
+    res.json({ profile: await customerProfile(salonId, customerId(req)) });
   }),
 );
 
 customerRouter.patch(
   '/preferences',
   requireAuth,
-  handler((req, res) => {
+  handler(async (req, res) => {
     const body = z
       .object({
         whatsappConsent: z.boolean().optional(),
@@ -391,11 +404,11 @@ customerRouter.patch(
         quietHoursEnd: z.string().regex(/^\d{2}:\d{2}$/).optional(),
       })
       .parse(req.body);
-    const next = savePreferences(customerId(req), body);
+    const next = await savePreferences(customerId(req), body);
     if (body.promotionalConsent !== undefined) {
-      run('UPDATE customer_profiles SET marketingConsent = ? WHERE customerId = ?', body.promotionalConsent, customerId(req));
+      await run('UPDATE customer_profiles SET marketingConsent = ? WHERE customerId = ?', body.promotionalConsent, customerId(req));
     }
-    audit(customerId(req), 'customer.preferences', 'user', customerId(req), body, req.ip);
+    await audit(customerId(req), 'customer.preferences', 'user', customerId(req), body, req.ip);
     res.json({ preferences: next });
   }),
 );
@@ -403,9 +416,9 @@ customerRouter.patch(
 customerRouter.get(
   '/notifications',
   requireAuth,
-  handler((req, res) => {
-    const salonId = scopedSalonId(req.auth!);
-    const rows = all(
+  handler(async (req, res) => {
+    const salonId = await scopedSalonId(req.auth!);
+    const rows = await all(
       'SELECT * FROM notifications WHERE customerId = ? ORDER BY createdAt DESC LIMIT 50',
       customerId(req),
     );
@@ -430,7 +443,7 @@ customerRouter.post(
   '/notifications/:id/retry',
   requireAuth,
   handler(async (req, res) => {
-    const row = one('SELECT * FROM notifications WHERE id = ? AND customerId = ?', req.params.id!, customerId(req));
+    const row = await one('SELECT * FROM notifications WHERE id = ? AND customerId = ?', req.params.id!, customerId(req));
     if (!row) throw notFound('Notification not found.');
     const updated = await attemptSendAsync(row.id);
     res.json({ notification: updated });
@@ -440,9 +453,9 @@ customerRouter.post(
 customerRouter.post(
   '/push-subscription',
   requireAuth,
-  handler((req, res) => {
+  handler(async (req, res) => {
     const body = z.object({ endpoint: z.string().url(), keys: z.record(z.string()) }).parse(req.body);
-    run(
+    await run(
       'INSERT INTO push_subscriptions (id, customerId, endpoint, keysJson, createdAt) VALUES (?,?,?,?,?) ON CONFLICT(endpoint) DO UPDATE SET keysJson = excluded.keysJson',
       crypto.randomUUID(),
       customerId(req),
@@ -461,21 +474,21 @@ customerRouter.post(
 customerRouter.get(
   '/data-export',
   requireAuth,
-  handler((req, res) => {
+  handler(async (req, res) => {
     const cid = customerId(req);
-    const salonId = scopedSalonId(req.auth!);
+    const salonId = await scopedSalonId(req.auth!);
     const payload = {
       exportedAt: new Date().toISOString(),
-      user: one('SELECT id, name, phone, email, createdAt FROM users WHERE id = ?', cid),
-      profile: customerProfile(salonId, cid),
-      preferences: preferences(cid),
-      appointments: all('SELECT * FROM appointments WHERE customerId = ?', cid),
-      serviceRecords: all('SELECT * FROM service_records WHERE customerId = ?', cid),
-      wallet: one('SELECT * FROM wallets WHERE customerId = ?', cid),
-      walletTransactions: all('SELECT * FROM wallet_transactions WHERE customerId = ?', cid),
-      referrals: all('SELECT * FROM referrals WHERE referrerId = ? OR referredCustomerId = ?', cid, cid),
-      rewards: all('SELECT * FROM reward_transactions WHERE customerId = ?', cid),
-      notifications: all('SELECT * FROM notifications WHERE customerId = ?', cid),
+      user: await one('SELECT id, name, phone, email, createdAt FROM users WHERE id = ?', cid),
+      profile: await customerProfile(salonId, cid),
+      preferences: await preferences(cid),
+      appointments: await all('SELECT * FROM appointments WHERE customerId = ?', cid),
+      serviceRecords: await all('SELECT * FROM service_records WHERE customerId = ?', cid),
+      wallet: await one('SELECT * FROM wallets WHERE customerId = ?', cid),
+      walletTransactions: await all('SELECT * FROM wallet_transactions WHERE customerId = ?', cid),
+      referrals: await all('SELECT * FROM referrals WHERE referrerId = ? OR referredCustomerId = ?', cid, cid),
+      rewards: await all('SELECT * FROM reward_transactions WHERE customerId = ?', cid),
+      notifications: await all('SELECT * FROM notifications WHERE customerId = ?', cid),
     };
     res.json(payload);
   }),
@@ -484,12 +497,12 @@ customerRouter.get(
 customerRouter.post(
   '/account-deletion',
   requireAuth,
-  handler((req, res) => {
+  handler(async (req, res) => {
     const body = z.object({ confirm: z.literal('DELETE') }).parse(req.body);
     void body;
     const cid = customerId(req);
-    tx(() => {
-      run(
+    await tx(async () => {
+      await run(
         'INSERT INTO data_requests (id, customerId, kind, status, createdAt) VALUES (?,?,?,?,?)',
         crypto.randomUUID(),
         cid,
@@ -498,10 +511,10 @@ customerRouter.post(
         new Date().toISOString(),
       );
       /* Anonymise immediately; financial records are retained as required for accounting. */
-      run("UPDATE users SET name = 'Deleted customer', email = NULL, status = 'deactivated', updatedAt = ? WHERE id = ?", new Date().toISOString(), cid);
-      run('UPDATE customer_profiles SET marketingConsent = 0, birthday = NULL WHERE customerId = ?', cid);
-      savePreferences(cid, { whatsappConsent: false, pushEnabled: false, promotionalConsent: false });
-      run('DELETE FROM sessions WHERE userId = ?', cid);
+      await run("UPDATE users SET name = 'Deleted customer', email = NULL, status = 'deactivated', updatedAt = ? WHERE id = ?", new Date().toISOString(), cid);
+      await run('UPDATE customer_profiles SET marketingConsent = 0, birthday = NULL WHERE customerId = ?', cid);
+      await savePreferences(cid, { whatsappConsent: false, pushEnabled: false, promotionalConsent: false });
+      await run('DELETE FROM sessions WHERE userId = ?', cid);
     });
     res.json({
       ok: true,

@@ -25,14 +25,22 @@ function branchClause(alias: string, branchIds?: string[]) {
   };
 }
 
+/**
+ * The first ten characters of an ISO timestamp — the calendar day, in UTC.
+ * (`date(x)` in the old SQLite build did the same thing.)
+ */
+function day10(expr: string): string {
+  return `substring(${expr} from 1 for 10)`;
+}
+
 /* ------------------------------------------------------------------ */
 /* Today                                                               */
 /* ------------------------------------------------------------------ */
 
-export function todayOverview(scope: ScopeFilter, date = isoDate()): TodayOverview {
+export async function todayOverview(scope: ScopeFilter, date = isoDate()): Promise<TodayOverview> {
   const b = branchClause('a', scope.branchIds);
 
-  const appts = all<DbRow>(
+  const appts = await all<DbRow>(
     `SELECT a.* FROM appointments a WHERE a.salonId = ? AND a.date = ?${b.sql}`,
     scope.salonId,
     date,
@@ -41,40 +49,41 @@ export function todayOverview(scope: ScopeFilter, date = isoDate()): TodayOvervi
 
   const completed = appts.filter((a) => a.status === 'completed');
   const s = branchClause('sr', scope.branchIds);
-  const records = all<DbRow>(
-    `SELECT sr.* FROM service_records sr WHERE sr.salonId = ? AND date(sr.completedAt) = ?${s.sql}`,
+  const records = await all<DbRow>(
+    `SELECT sr.* FROM service_records sr WHERE sr.salonId = ? AND ${day10('sr."completedAt"')} = ?${s.sql}`,
     scope.salonId,
     date,
     ...s.params,
   );
 
-  const revenueCollected = records.reduce((sum, r) => sum + r.finalAmount, 0) + sumWalletToday(scope, date);
+  const revenueCollected =
+    records.reduce((sum, r) => sum + r.finalAmount, 0) + (await sumWalletToday(scope, date));
   const walletPayments = records.reduce((sum, r) => sum + r.walletAmount, 0);
   const directPayments = records.reduce((sum, r) => sum + r.onlineAmount + r.cashAmount, 0);
 
   const visitedCustomers = new Set(records.map((r) => r.customerId));
 
-  const newCustomers = scalar<number>(
+  const newCustomers = await scalar<number>(
     `SELECT COUNT(*) FROM users u
-      WHERE u.role = 'customer' AND date(u.createdAt) = ?
+      WHERE u.role = 'customer' AND ${day10('u."createdAt"')} = ?
         AND EXISTS (SELECT 1 FROM service_records sr WHERE sr.customerId = u.id AND sr.salonId = ?)`,
     date,
     scope.salonId,
   );
-  const newRegistrations = scalar<number>(
-    "SELECT COUNT(*) FROM users WHERE role = 'customer' AND date(createdAt) = ?",
+  const newRegistrations = await scalar<number>(
+    `SELECT COUNT(*) FROM users WHERE role = 'customer' AND ${day10('"createdAt"')} = ?`,
     date,
   );
 
-  const walletCash = scalar<number>(
+  const walletCash = await scalar<number>(
     `SELECT COALESCE(SUM(amount),0) FROM wallet_transactions WHERE salonId = ? AND balanceType = 'cash' AND status = 'posted'`,
     scope.salonId,
   );
-  const walletBonus = scalar<number>(
+  const walletBonus = await scalar<number>(
     `SELECT COALESCE(SUM(amount),0) FROM wallet_transactions WHERE salonId = ? AND balanceType = 'bonus' AND status = 'posted'`,
     scope.salonId,
   );
-  const referralRewardExpense = scalar<number>(
+  const referralRewardExpense = await scalar<number>(
     `SELECT COALESCE(SUM(rt.amount),0) FROM reward_transactions rt JOIN referrals r ON r.id = rt.referralId
       WHERE r.salonId = ? AND rt.status = 'credited' AND rt.type <> 'reversal'`,
     scope.salonId,
@@ -106,7 +115,7 @@ export function todayOverview(scope: ScopeFilter, date = isoDate()): TodayOvervi
 function sumWalletToday(scope: ScopeFilter, date: string) {
   return scalar<number>(
     `SELECT COALESCE(SUM(po.amountPaid),0) FROM payment_orders po
-      WHERE po.salonId = ? AND po.status = 'paid' AND date(po.verifiedAt) = ?`,
+      WHERE po.salonId = ? AND po.status = 'paid' AND ${day10('po."verifiedAt"')} = ?`,
     scope.salonId,
     date,
   );
@@ -117,17 +126,17 @@ function sumWalletToday(scope: ScopeFilter, date: string) {
  * Revenue/visits come from completed service records; appointments from the
  * booking calendar. Every point maps to an actual calendar date.
  */
-export function dailyTrend(scope: ScopeFilter, endDate = isoDate(), days = 7): DailyTrendPoint[] {
+export async function dailyTrend(scope: ScopeFilter, endDate = isoDate(), days = 7): Promise<DailyTrendPoint[]> {
   const from = addDays(endDate, -(days - 1));
 
   const s = branchClause('sr', scope.branchIds);
-  const revenueRows = all<DbRow>(
-    `SELECT date(sr.completedAt) AS day,
+  const revenueRows = await all<DbRow>(
+    `SELECT ${day10('sr."completedAt"')} AS day,
             COALESCE(SUM(sr.finalAmount),0) AS revenue,
             COUNT(DISTINCT sr.customerId) AS visits
        FROM service_records sr
-      WHERE sr.salonId = ? AND date(sr.completedAt) BETWEEN ? AND ?${s.sql}
-      GROUP BY day`,
+      WHERE sr.salonId = ? AND ${day10('sr."completedAt"')} BETWEEN ? AND ?${s.sql}
+      GROUP BY ${day10('sr."completedAt"')}`,
     scope.salonId,
     from,
     endDate,
@@ -135,11 +144,11 @@ export function dailyTrend(scope: ScopeFilter, endDate = isoDate(), days = 7): D
   );
 
   const a = branchClause('a', scope.branchIds);
-  const appointmentRows = all<DbRow>(
+  const appointmentRows = await all<DbRow>(
     `SELECT a.date AS day, COUNT(*) AS appointments
        FROM appointments a
       WHERE a.salonId = ? AND a.date BETWEEN ? AND ?${a.sql}
-      GROUP BY day`,
+      GROUP BY a.date`,
     scope.salonId,
     from,
     endDate,
@@ -168,11 +177,11 @@ export function dailyTrend(scope: ScopeFilter, endDate = isoDate(), days = 7): D
 /* Revenue                                                             */
 /* ------------------------------------------------------------------ */
 
-export function revenueReport(scope: ScopeFilter, from: string, to: string): RevenueReport {
+export async function revenueReport(scope: ScopeFilter, from: string, to: string): Promise<RevenueReport> {
   const s = branchClause('sr', scope.branchIds);
-  const records = all<DbRow>(
+  const records = await all<DbRow>(
     `SELECT sr.* FROM service_records sr
-      WHERE sr.salonId = ? AND date(sr.completedAt) BETWEEN ? AND ?${s.sql}`,
+      WHERE sr.salonId = ? AND ${day10('sr."completedAt"')} BETWEEN ? AND ?${s.sql}`,
     scope.salonId,
     from,
     to,
@@ -183,15 +192,15 @@ export function revenueReport(scope: ScopeFilter, from: string, to: string): Rev
   const discounts = records.reduce((sum, r) => sum + r.discount, 0);
   const netCollected = records.reduce((sum, r) => sum + r.finalAmount, 0);
 
-  const refunds = scalar<number>(
-    `SELECT COALESCE(SUM(amount),0) FROM refunds WHERE salonId = ? AND date(createdAt) BETWEEN ? AND ? AND status = 'processed'`,
+  const refunds = await scalar<number>(
+    `SELECT COALESCE(SUM(amount),0) FROM refunds WHERE salonId = ? AND ${day10('"createdAt"')} BETWEEN ? AND ? AND status = 'processed'`,
     scope.salonId,
     from,
     to,
   );
 
-  const recharges = all<DbRow>(
-    `SELECT * FROM payment_orders WHERE salonId = ? AND status = 'paid' AND date(verifiedAt) BETWEEN ? AND ?`,
+  const recharges = await all<DbRow>(
+    `SELECT * FROM payment_orders WHERE salonId = ? AND status = 'paid' AND ${day10('"verifiedAt"')} BETWEEN ? AND ?`,
     scope.salonId,
     from,
     to,
@@ -200,26 +209,26 @@ export function revenueReport(scope: ScopeFilter, from: string, to: string): Rev
     .filter((r) => r.purpose === 'wallet_recharge')
     .reduce((sum, r) => sum + r.amountPaid, 0);
 
-  const walletBonusGranted = scalar<number>(
+  const walletBonusGranted = await scalar<number>(
     `SELECT COALESCE(SUM(amount),0) FROM wallet_transactions
       WHERE salonId = ? AND balanceType = 'bonus' AND type IN ('recharge','referral_bonus') AND status = 'posted'
-        AND date(createdAt) BETWEEN ? AND ?`,
+        AND ${day10('"createdAt"')} BETWEEN ? AND ?`,
     scope.salonId,
     from,
     to,
   );
 
-  const cashLiability = scalar<number>(
+  const cashLiability = await scalar<number>(
     `SELECT COALESCE(SUM(amount),0) FROM wallet_transactions WHERE salonId = ? AND balanceType = 'cash' AND status = 'posted'`,
     scope.salonId,
   );
-  const bonusLiability = scalar<number>(
+  const bonusLiability = await scalar<number>(
     `SELECT COALESCE(SUM(amount),0) FROM wallet_transactions WHERE salonId = ? AND balanceType = 'bonus' AND status = 'posted'`,
     scope.salonId,
   );
-  const referralRewardExpense = scalar<number>(
+  const referralRewardExpense = await scalar<number>(
     `SELECT COALESCE(SUM(rt.amount),0) FROM reward_transactions rt JOIN referrals r ON r.id = rt.referralId
-      WHERE r.salonId = ? AND rt.status = 'credited' AND rt.type <> 'reversal' AND date(rt.createdAt) BETWEEN ? AND ?`,
+      WHERE r.salonId = ? AND rt.status = 'credited' AND rt.type <> 'reversal' AND ${day10('rt."createdAt"')} BETWEEN ? AND ?`,
     scope.salonId,
     from,
     to,
@@ -253,7 +262,7 @@ export function revenueReport(scope: ScopeFilter, from: string, to: string): Rev
     seriesMap.set(day, entry);
   }
 
-  const outstanding = scalar<number>(
+  const outstanding = await scalar<number>(
     `SELECT COALESCE(SUM(totalAmount - paidAmount),0) FROM appointments
       WHERE salonId = ? AND status = 'completed' AND paymentStatus <> 'paid'`,
     scope.salonId,
@@ -283,36 +292,44 @@ export function revenueReport(scope: ScopeFilter, from: string, to: string): Rev
 /* Customers                                                           */
 /* ------------------------------------------------------------------ */
 
-export function topCustomers(scope: ScopeFilter, opts: { from?: string; to?: string; sort?: 'spend' | 'visits' | 'referrals'; limit?: number } = {}): TopCustomer[] {
+export async function topCustomers(
+  scope: ScopeFilter,
+  opts: { from?: string; to?: string; sort?: 'spend' | 'visits' | 'referrals'; limit?: number } = {},
+): Promise<TopCustomer[]> {
   const s = branchClause('sr', scope.branchIds);
   const from = opts.from ?? '1970-01-01';
   const to = opts.to ?? isoDate();
-  const rows = all<DbRow>(
+  const rows = await all<DbRow>(
     `SELECT u.id AS customerId, u.name, u.phone,
             COALESCE(SUM(sr.finalAmount),0) AS totalSpend,
             COUNT(sr.id) AS visits,
             MAX(sr.completedAt) AS lastVisitAt
        FROM users u
        LEFT JOIN service_records sr ON sr.customerId = u.id AND sr.salonId = ?
-            AND date(sr.completedAt) BETWEEN ? AND ?${s.sql}
+            AND ${day10('sr."completedAt"')} BETWEEN ? AND ?${s.sql}
       WHERE u.role = 'customer'
       GROUP BY u.id
-      HAVING visits > 0`,
+      HAVING COUNT(sr.id) > 0`,
     scope.salonId,
     from,
     to,
     ...s.params,
   );
 
-  const mapped: TopCustomer[] = rows.map((row) => {
-    const walletRow = one<DbRow>('SELECT id FROM wallets WHERE salonId = ? AND customerId = ?', scope.salonId, row.customerId);
-    const b = walletRow ? balances(walletRow.id) : { cash: 0, bonus: 0, total: 0 };
-    const referrals = scalar<number>(
+  const mapped: TopCustomer[] = [];
+  for (const row of rows) {
+    const walletRow = await one<DbRow>(
+      'SELECT id FROM wallets WHERE salonId = ? AND customerId = ?',
+      scope.salonId,
+      row.customerId,
+    );
+    const b = walletRow ? await balances(walletRow.id) : { cash: 0, bonus: 0, total: 0 };
+    const referrals = await scalar<number>(
       "SELECT COUNT(*) FROM referrals WHERE salonId = ? AND referrerId = ? AND status IN ('qualified','rewarded')",
       scope.salonId,
       row.customerId,
     );
-    return {
+    mapped.push({
       customerId: row.customerId,
       name: row.name,
       phoneMasked: maskPhone(row.phone),
@@ -322,8 +339,8 @@ export function topCustomers(scope: ScopeFilter, opts: { from?: string; to?: str
       lastVisitAt: row.lastVisitAt,
       walletBalance: b.total,
       referrals,
-    };
-  });
+    });
+  }
 
   const sort = opts.sort ?? 'spend';
   mapped.sort((a, b2) =>
@@ -332,29 +349,31 @@ export function topCustomers(scope: ScopeFilter, opts: { from?: string; to?: str
   return mapped.slice(0, opts.limit ?? 20);
 }
 
-export function listCustomers(scope: ScopeFilter, opts: { search?: string; limit?: number } = {}): CustomerProfile[] {
+export async function listCustomers(scope: ScopeFilter, opts: { search?: string; limit?: number } = {}): Promise<CustomerProfile[]> {
   const params: (string | number)[] = [scope.salonId];
   let searchClause = '';
   if (opts.search) {
-    searchClause = ' AND (u.name LIKE ? OR u.phone LIKE ?)';
+    searchClause = ' AND (u.name ILIKE ? OR u.phone ILIKE ?)';
     params.push(`%${opts.search}%`, `%${opts.search}%`);
   }
   params.push(opts.limit ?? 100);
-  const rows = all<DbRow>(
+  const rows = await all<DbRow>(
     `SELECT u.id, u.name, u.phone, u.createdAt,
             p.lastVisitAt, p.totalVisits, p.totalCompletedSpend, p.preferredServices, p.marketingConsent, p.birthday
        FROM users u
        LEFT JOIN customer_profiles p ON p.customerId = u.id
-      WHERE u.role = 'customer'${searchClause}
+      WHERE u.role = 'customer' AND p.salonId = ?${searchClause}
       ORDER BY COALESCE(p.totalCompletedSpend, 0) DESC LIMIT ?`,
     ...params,
   );
-  return rows.map((row) => customerProfileFromRow(scope.salonId, row));
+  const out: CustomerProfile[] = [];
+  for (const row of rows) out.push(await customerProfileFromRow(scope.salonId, row));
+  return out;
 }
 
-function customerProfileFromRow(salonId: string, row: DbRow): CustomerProfile {
-  const walletRow = one<DbRow>('SELECT id FROM wallets WHERE salonId = ? AND customerId = ?', salonId, row.id);
-  const b = walletRow ? balances(walletRow.id) : { cash: 0, bonus: 0, total: 0 };
+async function customerProfileFromRow(salonId: string, row: DbRow): Promise<CustomerProfile> {
+  const walletRow = await one<DbRow>('SELECT id FROM wallets WHERE salonId = ? AND customerId = ?', salonId, row.id);
+  const b = walletRow ? await balances(walletRow.id) : { cash: 0, bonus: 0, total: 0 };
   const wallet: Wallet | null = walletRow
     ? {
         id: walletRow.id,
@@ -379,7 +398,7 @@ function customerProfileFromRow(salonId: string, row: DbRow): CustomerProfile {
     marketingConsent: row.marketingConsent === null || row.marketingConsent === undefined ? true : !!row.marketingConsent,
     birthday: row.birthday ?? null,
     wallet,
-    successfulReferrals: scalar<number>(
+    successfulReferrals: await scalar<number>(
       "SELECT COUNT(*) FROM referrals WHERE salonId = ? AND referrerId = ? AND status IN ('qualified','rewarded')",
       salonId,
       row.id,
@@ -388,8 +407,8 @@ function customerProfileFromRow(salonId: string, row: DbRow): CustomerProfile {
   };
 }
 
-export function customerProfile(salonId: string, customerId: string): CustomerProfile | null {
-  const row = one<DbRow>(
+export async function customerProfile(salonId: string, customerId: string): Promise<CustomerProfile | null> {
+  const row = await one<DbRow>(
     `SELECT u.id, u.name, u.phone, u.createdAt,
             p.lastVisitAt, p.totalVisits, p.totalCompletedSpend, p.preferredServices, p.marketingConsent, p.birthday
        FROM users u LEFT JOIN customer_profiles p ON p.customerId = u.id
@@ -403,7 +422,7 @@ export function customerProfile(salonId: string, customerId: string): CustomerPr
 /* Retention                                                           */
 /* ------------------------------------------------------------------ */
 
-export function retentionReport(scope: ScopeFilter): RetentionReport {
+export async function retentionReport(scope: ScopeFilter): Promise<RetentionReport> {
   const s = branchClause('sr', scope.branchIds);
   const inactive = (days: number) =>
     scalar<number>(
@@ -411,35 +430,36 @@ export function retentionReport(scope: ScopeFilter): RetentionReport {
         JOIN service_records sr ON sr.customerId = u.id AND sr.salonId = ?${s.sql}
        WHERE u.role = 'customer'
          AND sr.completedAt = (SELECT MAX(sr2.completedAt) FROM service_records sr2 WHERE sr2.customerId = u.id)
-         AND julianday('now') - julianday(sr.completedAt) > ?`,
+         AND EXTRACT(EPOCH FROM (NOW() - (sr."completedAt")::timestamptz)) / 86400 > ?`,
       scope.salonId,
       ...s.params,
       days,
     );
 
-  const popular = all<DbRow>(
+  const popular = await all<DbRow>(
     `SELECT srv.name AS name, COUNT(*) AS count
-       FROM service_records sr, json_each(sr.servicesJson) je
-       JOIN services srv ON srv.id = json_extract(je.value, '$.serviceId')
+       FROM service_records sr
+       CROSS JOIN LATERAL jsonb_array_elements(sr."servicesJson"::jsonb) AS je(value)
+       JOIN services srv ON srv.id = je.value->>'serviceId'
       WHERE sr.salonId = ?
-      GROUP BY srv.id ORDER BY count DESC LIMIT 8`,
+      GROUP BY srv.id ORDER BY COUNT(*) DESC LIMIT 8`,
     scope.salonId,
   );
 
-  const totalCustomers = scalar<number>(
+  const totalCustomers = await scalar<number>(
     `SELECT COUNT(DISTINCT sr.customerId) FROM service_records sr WHERE sr.salonId = ?`,
     scope.salonId,
   );
-  const repeatCustomers = scalar<number>(
-    `SELECT COUNT(*) FROM (SELECT sr.customerId, COUNT(*) c FROM service_records sr WHERE sr.salonId = ? GROUP BY sr.customerId HAVING c > 1)`,
+  const repeatCustomers = await scalar<number>(
+    `SELECT COUNT(*) FROM (SELECT sr.customerId FROM service_records sr WHERE sr.salonId = ? GROUP BY sr.customerId HAVING COUNT(*) > 1) AS repeaters`,
     scope.salonId,
   );
-  const avg = scalar<number>(
+  const avg = await scalar<number>(
     'SELECT COALESCE(AVG(finalAmount),0) FROM service_records WHERE salonId = ?',
     scope.salonId,
   );
 
-  const conversions = all<DbRow>(
+  const conversions = await all<DbRow>(
     `SELECT n.stage,
             COUNT(*) AS sent,
             SUM(CASE WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.customerId = n.customerId AND a.createdAt > n.scheduledAt)
@@ -451,13 +471,13 @@ export function retentionReport(scope: ScopeFilter): RetentionReport {
   );
 
   return {
-    inactive30: inactive(30),
-    inactive60: inactive(60),
-    inactive90: inactive(90),
+    inactive30: await inactive(30),
+    inactive60: await inactive(60),
+    inactive90: await inactive(90),
     popularServices: popular as { name: string; count: number }[],
     repeatCustomerPercent: totalCustomers ? Math.round((repeatCustomers / totalCustomers) * 100) : 0,
     averageSpend: Math.round(avg),
-    referralAcquisition: scalar<number>(
+    referralAcquisition: await scalar<number>(
       "SELECT COUNT(*) FROM referrals WHERE salonId = ? AND status IN ('qualified','rewarded')",
       scope.salonId,
     ),

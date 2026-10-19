@@ -9,7 +9,7 @@ import { forbidden, notFound } from './http';
  * The scope is derived from the **session**, never from the request body, so a
  * staff member cannot widen their own access by editing a payload.
  */
-export function SCOPED(req: Request): { salonId: string; branchIds: string[] } {
+export async function SCOPED(req: Request): Promise<{ salonId: string; branchIds: string[] }> {
   const auth = req.auth;
   if (!auth) throw forbidden();
 
@@ -21,14 +21,14 @@ export function SCOPED(req: Request): { salonId: string; branchIds: string[] } {
   } else if (auth.salonId) {
     salonId = auth.salonId;
   } else {
-    const salon = one<{ id: string }>('SELECT id FROM salons LIMIT 1');
+    const salon = await one<{ id: string }>('SELECT id FROM salons LIMIT 1');
     if (!salon) throw notFound('No salon is configured yet.');
     salonId = salon.id;
   }
 
   let branchIds = auth.branchIds;
   if (auth.role === 'super_admin' || auth.role === 'salon_owner') {
-    branchIds = all<{ id: string }>('SELECT id FROM branches WHERE salonId = ?', salonId).map((b) => b.id);
+    branchIds = (await all<{ id: string }>('SELECT id FROM branches WHERE salonId = ?', salonId)).map((b) => b.id);
   }
 
   return { salonId, branchIds };

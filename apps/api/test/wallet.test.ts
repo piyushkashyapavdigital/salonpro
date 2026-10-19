@@ -13,8 +13,8 @@ after(async () => {
   await h.close();
 });
 
-function customerId(phone: string): string {
-  return h.db.one<{ id: string }>('SELECT id FROM users WHERE phone = ?', phone)!.id;
+async function customerId(phone: string): Promise<string> {
+  return (await h.db.one<{ id: string }>('SELECT id FROM users WHERE phone = ?', phone))!.id;
 }
 
 let phoneCounter = 0;
@@ -82,7 +82,7 @@ test('a simulated recharge credits cash and bonus as separate ledger rows', asyn
   assert.equal(sim.data.wallet.cashBalance, 50000);
   assert.equal(sim.data.wallet.bonusBalance, 5000);
 
-  const rows = h.db.all<{ balanceType: string; amount: number; type: string }>(
+  const rows = await h.db.all<{ balanceType: string; amount: number; type: string }>(
     'SELECT balanceType, amount, type FROM wallet_transactions WHERE customerId = ? AND type = ? ORDER BY createdAt',
     id,
     'recharge',
@@ -143,7 +143,7 @@ test('balances always equal the sum of posted ledger rows (append-only invariant
   const checkout = await recharge(token, 50000);
   await h.post('/payments/simulate', { razorpayOrderId: checkout.orderId, outcome: 'success' }, token);
   const wallet = await h.get<{ wallet: any }>('/customer/wallet', token);
-  const sum = h.db.one<{ cash: number; bonus: number }>(
+  const sum = await h.db.one<{ cash: number; bonus: number }>(
     `SELECT
         COALESCE(SUM(CASE WHEN balanceType='cash' THEN amount END),0) AS cash,
         COALESCE(SUM(CASE WHEN balanceType='bonus' THEN amount END),0) AS bonus
@@ -156,7 +156,7 @@ test('balances always equal the sum of posted ledger rows (append-only invariant
 
 test('an owner can adjust a wallet with a reason and it is audited', async () => {
   const owner = await h.login(ACCOUNTS.owner);
-  const cid = customerId(ACCOUNTS.customer2);
+  const cid = await customerId(ACCOUNTS.customer2);
   const before = await h.get<{ wallet: any }>(`/admin/customers/${cid}`, owner);
   const beforeCash = before.data.wallet.cashBalance;
 
@@ -167,7 +167,7 @@ test('an owner can adjust a wallet with a reason and it is audited', async () =>
   );
   assert.equal(res.status, 200);
   assert.equal(res.data.wallet.cashBalance, beforeCash + 25000);
-  const audit = h.db.one(
+  const audit = await h.db.one(
     "SELECT * FROM audit_logs WHERE action = 'wallet.adjust' AND entityId = ? LIMIT 1",
     res.data.wallet.id,
   );
@@ -176,7 +176,7 @@ test('an owner can adjust a wallet with a reason and it is audited', async () =>
 
 test('an adjustment without a reason is rejected (audit requirement)', async () => {
   const owner = await h.login(ACCOUNTS.owner);
-  const cid = customerId(ACCOUNTS.customer2);
+  const cid = await customerId(ACCOUNTS.customer2);
   const res = await h.post(`/admin/customers/${cid}/wallet/adjust`, { amount: 100, balanceType: 'cash', reason: 'x' }, owner);
   assert.equal(res.status, 400);
 });

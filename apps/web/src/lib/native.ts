@@ -38,12 +38,15 @@ export async function initNativeChrome() {
 /* Hardware back button                                                */
 /* ------------------------------------------------------------------ */
 
-/** Routes where a back press has nothing left to pop. */
-const ROOT_ROUTES = ['/', '/login', '/app', '/admin'];
-
 /**
  * Android hardware back: pop the SPA history, otherwise double-tap-to-exit —
  * exactly what a native app does. Returns an unsubscribe function.
+ *
+ * The only trustworthy "is there anywhere to go back to" signal is Capacitor's
+ * `canGoBack`, which mirrors the WebView's own `canGoBack()`. Do not reach for
+ * `window.history.length`: it counts entries the user has already popped (a
+ * back press leaves the count unchanged), so a deeper stack would pin the app
+ * in a `history.back()` no-op loop and the back button would appear dead.
  */
 export async function initBackButton(onExitBlocked?: () => void) {
   if (!isNative()) return () => {};
@@ -52,14 +55,7 @@ export async function initBackButton(onExitBlocked?: () => void) {
   let lastPress = 0;
 
   const listener = await App.addListener('backButton', ({ canGoBack }) => {
-    const path = window.location.pathname;
-    const atRoot = ROOT_ROUTES.includes(path);
-
-    if (!atRoot && (canGoBack || window.history.length > 1)) {
-      window.history.back();
-      return;
-    }
-    if (atRoot && window.history.length > 1) {
+    if (canGoBack) {
       window.history.back();
       return;
     }

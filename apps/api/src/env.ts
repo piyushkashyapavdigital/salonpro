@@ -48,7 +48,15 @@ function bool(key: string, fallback: boolean): boolean {
 export const env = {
   nodeEnv: str('NODE_ENV', 'development'),
   port: num('PORT', 4000),
-  databaseFile: str('DATABASE_FILE', path.join(REPO_ROOT, 'data', 'salonpro.db')),
+  repoRoot: REPO_ROOT,
+  /**
+   * Postgres connection. Neon in production:
+   *   DATABASE_URL=postgresql://user:pass@host/db?sslmode=require
+   * Local runs and tests fall back to PGlite (Postgres in WASM, no server):
+   *   DATABASE_URL=pglite:memory:            in-memory
+   *   DATABASE_URL=pglite:file:<dir>         file-backed
+   */
+  databaseUrl: str('DATABASE_URL', `pglite:file:${path.join(REPO_ROOT, 'data', 'pglite')}`),
 
   /** Session tokens are stored hashed. Rotate this to invalidate all sessions. */
   sessionSecret: str('SESSION_SECRET', 'dev-session-secret-change-me'),

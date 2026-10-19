@@ -8,21 +8,21 @@ export interface BusyInterval {
   appointmentId: string;
 }
 
-export function branchDayHours(branchId: string, date: string): DayHours | null {
-  const branch = one<{ openingHours: string }>('SELECT openingHours FROM branches WHERE id = ?', branchId);
+export async function branchDayHours(branchId: string, date: string): Promise<DayHours | null> {
+  const branch = await one<{ openingHours: string }>('SELECT openingHours FROM branches WHERE id = ?', branchId);
   if (!branch) return null;
   const hours = parseJson<OpeningHours>(branch.openingHours, {});
   const day = hours[weekdayIndex(date)];
   return day ?? null;
 }
 
-export function isHoliday(branchId: string, date: string): string | null {
-  const row = one<{ reason: string | null }>('SELECT reason FROM holidays WHERE branchId = ? AND date = ?', branchId, date);
+export async function isHoliday(branchId: string, date: string): Promise<string | null> {
+  const row = await one<{ reason: string | null }>('SELECT reason FROM holidays WHERE branchId = ? AND date = ?', branchId, date);
   return row ? row.reason ?? 'Closed' : null;
 }
 
-export function staffWorkingWindow(staffId: string, date: string): { start: number; end: number } | null {
-  const staff = one<{ workingHours: string }>('SELECT workingHours FROM staff WHERE id = ?', staffId);
+export async function staffWorkingWindow(staffId: string, date: string): Promise<{ start: number; end: number } | null> {
+  const staff = await one<{ workingHours: string }>('SELECT workingHours FROM staff WHERE id = ?', staffId);
   if (!staff) return null;
   const hours = parseJson<WorkingHours>(staff.workingHours, {});
   const day = hours[weekdayIndex(date)];
@@ -30,8 +30,8 @@ export function staffWorkingWindow(staffId: string, date: string): { start: numb
   return { start: timeToMinutes(day.start), end: timeToMinutes(day.end) };
 }
 
-export function staffBreaks(staffId: string, date: string): { start: number; end: number }[] {
-  const rows = all<{ startTime: string; endTime: string }>(
+export async function staffBreaks(staffId: string, date: string): Promise<{ start: number; end: number }[]> {
+  const rows = await all<{ startTime: string; endTime: string }>(
     'SELECT startTime, endTime FROM staff_breaks WHERE staffId = ? AND weekday = ?',
     staffId,
     weekdayIndex(date),
@@ -39,9 +39,9 @@ export function staffBreaks(staffId: string, date: string): { start: number; end
   return rows.map((r) => ({ start: timeToMinutes(r.startTime), end: timeToMinutes(r.endTime) }));
 }
 
-export function busyIntervals(staffId: string, date: string, excludeAppointmentId?: string): BusyInterval[] {
+export async function busyIntervals(staffId: string, date: string, excludeAppointmentId?: string): Promise<BusyInterval[]> {
   const placeholders = BLOCKING_STATUSES.map(() => '?').join(',');
-  const rows = all<{ id: string; startTime: string; endTime: string }>(
+  const rows = await all<{ id: string; startTime: string; endTime: string }>(
     `SELECT id, startTime, endTime FROM appointments
       WHERE staffId = ? AND date = ? AND status IN (${placeholders}) ${excludeAppointmentId ? 'AND id <> ?' : ''}`,
     staffId,
@@ -71,19 +71,19 @@ export function overlaps(a: { start: number; end: number }, b: { start: number; 
 }
 
 /** True when the interval is free for that staff member on that date. */
-export function isFree(
+export async function isFree(
   staffId: string,
   date: string,
   start: number,
   end: number,
   excludeAppointmentId?: string,
-): boolean {
-  const window = staffWorkingWindow(staffId, date);
+): Promise<boolean> {
+  const window = await staffWorkingWindow(staffId, date);
   if (!window) return false;
   if (start < window.start || end > window.end) return false;
-  const brk = staffBreaks(staffId, date);
+  const brk = await staffBreaks(staffId, date);
   if (brk.some((b) => overlaps({ start, end }, b))) return false;
-  const busy = busyIntervals(staffId, date, excludeAppointmentId);
+  const busy = await busyIntervals(staffId, date, excludeAppointmentId);
   return !busy.some((b) => overlaps({ start, end }, { start: b.start, end: b.end }));
 }
 
@@ -102,37 +102,36 @@ export interface SlotQuery {
  * Availability = branch opening hours − holidays − staff working hours
  * − staff breaks − existing blocking appointments.
  */
-export function findSlots(query: SlotQuery): AvailabilityResponse {
+export async function findSlots(query: SlotQuery): Promise<AvailabilityResponse> {
   const { branchId, date, durationMinutes } = query;
   const step = query.stepMinutes ?? 15;
 
-  const holiday = isHoliday(branchId, date);
+  const holiday = await isHoliday(branchId, date);
   if (holiday) {
     return { date, durationMinutes, slots: [], closed: true, reason: `Holiday: ${holiday}` };
   }
-  const hours = branchDayHours(branchId, date);
+  const hours = await branchDayHours(branchId, date);
   if (!hours || hours.closed) {
     return { date, durationMinutes, slots: [], closed: true, reason: 'Branch closed on this day' };
   }
 
   const open = timeToMinutes(hours.open);
   const close = timeToMinutes(hours.close);
-  const candidates = query.staffId
-    ? staffForBranch(branchId).filter((s) => s.id === query.staffId)
-    : staffForBranch(branchId);
+  const allStaff = await staffForBranch(branchId);
+  const candidates = query.staffId ? allStaff.filter((s) => s.id === query.staffId) : allStaff;
 
   const slots: AvailabilitySlot[] = [];
   const seen = new Set<string>();
 
   for (const staff of candidates) {
-    const window = staffWorkingWindow(staff.id, date);
+    const window = await staffWorkingWindow(staff.id, date);
     if (!window) continue;
     const from = Math.max(open, window.start);
     const to = Math.min(close, window.end);
 
     for (let start = from; start + durationMinutes <= to; start += step) {
       if (query.nowMinutes !== undefined && start < query.nowMinutes) continue;
-      if (!isFree(staff.id, date, start, start + durationMinutes, query.excludeAppointmentId)) continue;
+      if (!(await isFree(staff.id, date, start, start + durationMinutes, query.excludeAppointmentId))) continue;
       const end = start + durationMinutes;
       // When asking for "any stylist", collapse identical times to the first free one.
       const key = `${start}-${end}`;
@@ -150,18 +149,18 @@ export function findSlots(query: SlotQuery): AvailabilityResponse {
 }
 
 /** Pick the first staff member free for the whole window (used for "any stylist"). */
-export function pickAvailableStaff(
+export async function pickAvailableStaff(
   branchId: string,
   date: string,
   start: number,
   end: number,
   preferredStaffId?: string | null,
-): string | null {
+): Promise<string | null> {
   if (preferredStaffId) {
-    return isFree(preferredStaffId, date, start, end) ? preferredStaffId : null;
+    return (await isFree(preferredStaffId, date, start, end)) ? preferredStaffId : null;
   }
-  for (const staff of staffForBranch(branchId)) {
-    if (isFree(staff.id, date, start, end)) return staff.id;
+  for (const staff of await staffForBranch(branchId)) {
+    if (await isFree(staff.id, date, start, end)) return staff.id;
   }
   return null;
 }
