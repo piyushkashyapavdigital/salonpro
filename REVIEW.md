@@ -2,7 +2,7 @@
 
 A working review of the product specification, the gaps in it, and how the
 accompanying build (`packages/core` served through `apps/next` on Vercel, plus
-`apps/web`, `apps/mobile-customer`, `apps/mobile-admin`) resolves or deliberately defers each
+the `apps/mobile-customer` and `apps/mobile-admin` apps) resolves or deliberately defers each
 one. Written to be read next to the spec: each section names the issue, gives the
 risk, and states the concrete decision taken in code.
 
@@ -248,7 +248,7 @@ and a documented lawful basis for processing phone numbers.
 |---|---|
 | 3 interfaces (customer / owner / reception+staff) | Built |
 | Roles: super_admin, salon_owner, branch_manager, receptionist, salon_staff, customer | Built, RBAC enforced server-side |
-| Persistent database | Built (`node:sqlite`, WAL) |
+| Persistent database | Built (Postgres — Neon in production, PGlite in tests) |
 | OTP auth with honest dev-mock labelling | Built |
 | Razorpay test mode, server-side verify + signed webhooks | Built (simulated mode without keys; real HMAC math) |
 | Wallet offers ₹500→₹550 / ₹1000→₹1150 / ₹2000→₹2400 | Built + tested |
@@ -257,7 +257,7 @@ and a documented lawful basis for processing phone numbers.
 | Owner analytics incl. Top 20 customers | Built + tested |
 | Audit logs | Built (append-only by convention) |
 | Append-only ledger | Built + tested |
-| Installable PWA | Built (Workbox service worker) |
+| Installable PWA | **Removed** by request — the two native APKs are the product (the web UI remains in git history) |
 | Refund approval workflow | Built (capability-gated) |
 | Staff commission payouts | **Deferred** |
 | GDPR/retention specifics | Export/deletion built; retention **deferred** |

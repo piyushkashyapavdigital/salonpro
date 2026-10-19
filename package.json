@@ -2,37 +2,27 @@
   "name": "salonpro",
   "private": true,
   "version": "1.0.0",
-  "description": "SalonPro — salon management platform (Next.js API on Vercel + customer & admin apps)",
+  "description": "SalonPro — salon management platform (Next.js API on Vercel + customer & admin React Native apps)",
   "workspaces": [
     "packages/*",
-    "apps/next",
-    "apps/web",
-    "apps/admin"
+    "apps/next"
   ],
   "scripts": {
-    "dev": "concurrently -n api,web -c yellow,cyan \"npm:dev:api\" \"npm:dev:web\"",
-    "dev:api": "npm --workspace @salonpro/next run dev",
-    "dev:web": "npm --workspace @salonpro/web run dev",
+    "dev": "npm --workspace @salonpro/next run dev",
     "build": "bash scripts/build-next.sh",
-    "build:web": "npm --workspace @salonpro/web run build",
-    "build:admin": "npm --workspace @salonpro/web run build:admin",
     "start": "npm --workspace @salonpro/next run start",
     "seed": "npm --workspace @salonpro/core run seed",
-    "test": "npm --workspace @salonpro/shared run test && npm --workspace @salonpro/core run test && npm --workspace @salonpro/next run test && npm --workspace @salonpro/web run test",
+    "test": "npm --workspace @salonpro/shared run test && npm --workspace @salonpro/core run test && npm --workspace @salonpro/next run test",
     "test:api": "npm --workspace @salonpro/core run test",
     "test:next": "npm --workspace @salonpro/next run test",
     "test:shared": "npm --workspace @salonpro/shared run test",
-    "test:web": "npm --workspace @salonpro/web run test",
-    "typecheck": "npm --workspace @salonpro/core run typecheck && npm --workspace @salonpro/next run typecheck && npm --workspace @salonpro/web run typecheck",
+    "typecheck": "npm --workspace @salonpro/core run typecheck && npm --workspace @salonpro/next run typecheck",
     "seed:reset": "npm --workspace @salonpro/core run seed:reset",
     "seed:bootstrap": "npm --workspace @salonpro/core run bootstrap",
     "test:smoke": "npm --workspace @salonpro/core run smoke",
     "mobile:sync": "bash scripts/sync-mobile-shared.sh",
     "mobile:apks": "bash scripts/build-mobile-apks.sh",
     "mobile:install": "bash scripts/install-apks.sh"
-  },
-  "devDependencies": {
-    "concurrently": "^9.1.0"
   },
   "engines": {
     "node": ">=22.5"

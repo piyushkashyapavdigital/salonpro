@@ -25,11 +25,11 @@ import { REFUND_POLICY } from './lib/policy';
 /**
  * Origins allowed to call the API from a browser context.
  *
- * The packaged Android apps are Capacitor WebViews: their pages run on
- * `localhost` inside the app, so their requests are cross-origin and must be
- * allowed explicitly (a website cannot claim those origins from the outside).
+ * The native apps don't send an `Origin` header, so CORS is a no-op for them;
+ * this allow-list is for local tooling and any future web surface. `WEB_ORIGIN`
+ * is appended at request time.
  */
-const APP_ORIGINS = ['https://localhost', 'http://localhost', 'capacitor://localhost'];
+const APP_ORIGINS = ['https://localhost', 'http://localhost'];
 
 export function buildRouter() {
   const root = new Router();

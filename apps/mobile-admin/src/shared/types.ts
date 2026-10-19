@@ -7,8 +7,8 @@
  * Response envelopes the mobile apps read.
  *
  * Domain objects (Appointment, Service, Wallet, …) come from `../core`, which is
- * a copy of the shared package the API and the web app use — so a field rename
- * on the server fails the mobile typecheck instead of silently showing blanks.
+ * a copy of the shared package the API uses — so a field rename on the server
+ * fails the mobile typecheck instead of silently showing blanks.
  */
 import type {
   Appointment,

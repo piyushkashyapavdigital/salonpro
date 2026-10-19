@@ -253,7 +253,7 @@ export function BookScreen() {
               </Pressable>
               <Text style={styles.payNote}>
                 Card and UPI online payment is charged through the salon's payment provider and only marked paid after the
-                server verifies it. The salon's web app has the full checkout.
+                server verifies it. If the payment sheet is unavailable, use the wallet or pay at the salon.
               </Text>
             </Card>
 

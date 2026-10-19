@@ -155,7 +155,7 @@ describe('the Vercel request path', () => {
     assert.equal(res.headers.get('access-control-allow-origin'), 'http://localhost');
   });
 
-  test('lets the packaged apps (Capacitor origins) through', async () => {
+  test('allows a local browser origin through (CORS allow-list)', async () => {
     const res = await call('/api/health', { headers: { origin: 'https://localhost' } });
     assert.equal(res.headers.get('access-control-allow-origin'), 'https://localhost');
   });

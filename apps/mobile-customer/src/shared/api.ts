@@ -6,7 +6,7 @@
 /**
  * The API client both apps share.
  *
- * Differences from the browser version, and why:
+ * Choices worth knowing, and why:
  *   - The server address lives in AsyncStorage and can be changed at runtime
  *     from the sign-in screen, so one APK works against any reachable SalonPro
  *     server (a hosted URL, a laptop on the same Wi-Fi, a salon's own box).

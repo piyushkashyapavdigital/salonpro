@@ -1,9 +1,9 @@
 /**
  * Every endpoint the apps call, in one place.
  *
- * Kept as plain functions over `api()` rather than generated code so the mobile
- * apps, the web app and the tests all read the same server contract, and a
- * response-shape change shows up as a type error rather than a blank screen.
+ * Kept as plain functions over `api()` rather than generated code so the
+ * apps and the tests all read the same server contract, and a response-shape
+ * change shows up as a type error rather than a blank screen.
  */
 import { api } from './api';
 import type { Appointment, Wallet, WalletTransaction } from '../core';

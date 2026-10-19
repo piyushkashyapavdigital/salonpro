@@ -11,20 +11,16 @@
 #   4. check the local API is reachable on :4000
 #
 # Build the APKs first (if missing) with:
-#   bash scripts/build-mobile-apks.sh          # React Native apps (the ones shipped)
-#   bash scripts/build-apk.sh --no-install     # legacy Capacitor PWA shell
+#   bash scripts/build-mobile-apks.sh
 #
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# The React Native APKs in artifacts/ are the ones the salon installs; the
-# Capacitor PWA shells are the older packaging and are used only as a fallback.
+# The signed release APKs the salon installs (built by scripts/build-mobile-apks.sh).
 RN_CUSTOMER="artifacts/mobile-customer-1.0.0.apk"
 RN_ADMIN="artifacts/mobile-admin-1.0.0.apk"
-WEB_CUSTOMER="apps/web/android/app/build/outputs/apk/debug/app-debug.apk"
-WEB_ADMIN="apps/admin/android/app/build/outputs/apk/debug/app-debug.apk"
 
 if ! command -v adb >/dev/null 2>&1; then
   echo "ERROR: adb not found on PATH." >&2
@@ -60,15 +56,8 @@ install_one() {
   fi
 }
 
-pick() {
-  local name="$1" primary="$2" fallback="$3"
-  if [ -f "$primary" ]; then echo "$primary"
-  elif [ -f "$fallback" ]; then echo "$fallback"
-  else echo "$primary"; fi
-}
-
-install_one "$(pick customer "$RN_CUSTOMER" "$WEB_CUSTOMER")" "SalonPro (customer app)"
-install_one "$(pick admin "$RN_ADMIN" "$WEB_ADMIN")" "SalonPro Admin (staff app)"
+install_one "$RN_CUSTOMER" "SalonPro (customer app)"
+install_one "$RN_ADMIN" "SalonPro Admin (staff app)"
 
 echo
 echo "==> [4/4] API check (phone must reach this PC's LAN IP on whatever port the server prints)"

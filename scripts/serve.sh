@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SalonPro server launcher — frees the port, then starts the Next.js server
-# (the API *and* the web app on one origin).
+# SalonPro server launcher — frees the port, then starts the Next.js API
+# (the one address the customer and admin apps talk to).
 #
 #   bash scripts/serve.sh            # free :4000, build if needed, then start
 #   PORT=4100 bash scripts/serve.sh  # use another port
@@ -58,10 +58,8 @@ if [ -n "${LAN_IP:-}" ]; then
   echo "  API  on this PC    : http://127.0.0.1:${PORT}/api/health"
   echo "  API  on your phone : http://${LAN_IP}:${PORT}   <- what the APK calls"
   echo "                       (phone must be on the same Wi-Fi)"
-  echo "  Web  on this PC    : http://127.0.0.1:${PORT}/app"
 else
   echo "  API  http://127.0.0.1:${PORT}/api/health"
-  echo "  Web  http://127.0.0.1:${PORT}/app"
 fi
 echo "  stop with Ctrl+C"
 echo

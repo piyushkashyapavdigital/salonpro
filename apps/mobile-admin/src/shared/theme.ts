@@ -4,9 +4,9 @@
  * Re-run: bash scripts/sync-mobile-shared.sh
  * ------------------------------------------------------------------ */
 /**
- * SalonPro mobile design system.
+ * The SalonPro mobile design system.
  *
- * The same palette the web app uses (brand pinks over warm ink neutrals), as
+ * The one palette both apps use (brand pinks over warm ink neutrals), as
  * plain values — the apps are styled with StyleSheet rather than a CSS runtime,
  * so an Android build needs no NDK/CMake toolchain. Everything a screen needs to
  * look "SalonPro" lives here, so the two apps cannot drift apart.

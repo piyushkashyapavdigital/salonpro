@@ -1,11 +1,9 @@
 # SalonPro
 
-A premium salon platform: a customer PWA, an owner dashboard, a reception/staff
-console, and **two installable Android apps** — backed by one API and a
-persistent database. A soft blush / rose interface — rounded white cards, pink
-accents, bottom tab navigation — installable as a PWA and shipped as two
-React Native APKs (customer + salon staff) that talk to the same JSON API as the
-web app.
+A salon platform: a customer app, a salon-staff (admin) app, and **one API** —
+backed by a persistent database. A soft blush / rose interface — rounded white
+cards, pink accents, bottom tab navigation — shipped as two installable React
+Native APKs (customer + salon staff) that talk to one Next.js API.
 
 > **Honesty first.** This deployment runs Razorpay in **simulated** mode and OTP
 > in **development mock** mode until real keys are provided. When nothing is
@@ -18,8 +16,6 @@ web app.
 
 | Layer | Choice | Why |
 |---|---|---|
-| Web | Vite + React 18 + TypeScript + Tailwind + React Router + TanStack Query | Fast dev loop, no Expo/Metro |
-| PWA | `vite-plugin-pwa` (Workbox) | Installable, offline shell |
 | API | **Next.js 16 App Router** (`apps/next`) — one catch-all route handler dispatches into `packages/core` | Deploys to Vercel with no separate server and **no Express anywhere**; one warm function, one database pool |
 | Mobile | **React Native 0.87** (`apps/mobile-customer`, `apps/mobile-admin`) + React Navigation 7 | Real APKs with native navigation, AsyncStorage sessions and one shared UI kit — the same shape as the reference project |
 | DB | **Postgres** — Neon (`pg`) in production, **PGlite** (Postgres in WASM) locally and in tests | One SQL dialect everywhere; the test suite needs no database server |
@@ -56,53 +52,27 @@ boot, so a fresh Neon database becomes usable on the first `npm start`.
 
 ## Design system
 
-One theme drives the web app, the customer APK and the admin APK. It lives in
-`apps/web/tailwind.config.js` (tokens) and `apps/web/src/index.css` (primitives).
+One theme drives both apps. It lives in `apps/mobile-shared/src/theme.ts`
+(tokens) and `apps/mobile-shared/src/components.tsx` (the kit), and is copied
+into the customer and admin apps so they cannot drift apart.
 
 | Token | Meaning |
 |---|---|
-| `brand-*` | Rose accent (`#EC4899` core) — primary buttons, active tabs, badges, charts |
-| `ink-*` | Warm blush-tinted neutrals — `ink-50` is the app canvas, `ink-100` the hairline border, `300`–`500` muted text, `700`–`950` headings and numbers |
-| `mint` / `amber` / `rose` / `sky` | Success / warning / danger / info |
-| `.card` | White, `rounded-3xl`, soft rose-tinted shadow |
-| `.card-dark` | The blush-gradient hero card (wallet balance, revenue, referrals) |
-| `.btn-primary`, `.btn-brand` | Solid and gradient rose calls to action |
+| `colors.brand*` | Rose accent (`#EC4899` core) — primary buttons, active tabs, badges, charts |
+| `colors.ink*` | Warm blush-tinted neutrals — `ink50` is the app canvas, `ink100` the hairline border, `300`–`500` muted text, `700`–`950` headings and numbers |
+| `colors.mint` / `amber` / `rose` / `sky` | Success / warning / danger / info |
+| `gradients` | The blush-gradient hero cards (wallet balance, revenue, referrals) |
+| `space()`, `radius`, `font`, `shadow` | One spacing scale, rounded-card radii, the soft rose-tinted card shadow |
+| `statusColors()` / `STATUS_LABEL` | Every appointment/payment status colour and label in one place |
 
-Type is **Poppins** for display (headings, KPI numbers) and **Inter** for body.
-Both shells use a bottom tab bar; the dashboard adds a persistent sidebar from
-the `lg` breakpoint up and tucks the remaining sections behind **More**.
+The kit is plain React over `StyleSheet` — no NativeWind, no Reanimated, no CSS
+runtime — so an Android build needs no NDK/CMake toolchain. Both apps use
+React Navigation 7 with a bottom tab bar over the same `Screen`,
+`GradientHeader`, `Card`, `Button`, `Field`, `Chip`, `Banner`, `Badge`, `Empty`,
+`Loading`, `StatTile` and `Avatar` primitives.
 
-### Component system
-
-Three layers, all in `apps/web/src/components`:
-
-| Layer | Location | What it is |
-|---|---|---|
-| Design-system primitives | `ui.tsx` | `Card`, `Stat`, `Badge`, `Avatar`, `Drawer`, `Modal`, `Table`, charts — the components every page composes |
-| **shadcn/ui** | `shadcn/` | Radix-backed primitives generated in the shadcn style, themed through HSL CSS variables in `index.css`. `components.json` is wired up, so `npx shadcn@latest add <component>` works and writes to `shadcn/`. Includes `shadcn/chart` — the recharts-based `ChartContainer`/`ChartTooltip` used by the admin revenue trend |
-| **Magic UI / Aceternity-style** | `magic/` | `NumberTicker`, `BlurFade`, `Marquee`, `ShimmerButton`, `MagicCard`, `BorderBeam`, `AnimatedGradientText`, `SparklesText`, `AnimatedShinyText`, `Meteors`, `TabDock` |
-
-In active use right now: `shadcn/sheet` (every bottom-sheet menu), `shadcn/separator`,
-`shadcn/chart` (the admin "Collected · last 7 days" trend, fed by a real
-day-by-day API series), `shadcn/sonner` (all toasts, via `useToast()`), and
-`magic/tab-dock`, `magic/number-ticker`, `magic/blur-fade`, `magic/magic-card`.
-The rest of the kit is there to reach for.
-
-> The admin chart lives in `components/charts/` and is `React.lazy`-loaded, so
-> recharts is code-split out of the customer app's startup bundle (~400 kB off
-> the first paint for the customer APK).
-
-> Reveal and ticker animations deliberately animate **on mount**, not on
-> intersection, and fall back to the final value / plain markup when
-> `IntersectionObserver` or `requestAnimationFrame` cannot run (hidden document,
-> `prefers-reduced-motion`, jsdom). A number can therefore never be stranded
-> showing `0`, and content can never be stranded invisible.
-
-> Motion also respects the phone's own setting: `MotionConfig reducedMotion="user"`
-> in `App.tsx` plus a CSS media query means a device with "reduce motion" on gets
-> no sliding pills, meteors or ticking numbers. And every screen is wrapped in an
-> `ErrorBoundary`, so a crash shows a readable card with a reload button instead
-> of a blank white screen.
+Every screen sits inside an error boundary, so a crash shows a readable card
+with a reload button instead of a blank white screen.
 
 ---
 
@@ -111,19 +81,21 @@ The rest of the kit is there to reach for.
 ```bash
 npm install
 npm run seed:reset          # create + populate the demo database
-npm run dev                 # API on :4000, web on :5173
+npm run dev                 # API on :4000
 ```
 
-Then open <http://localhost:5173>.
-
 With no `DATABASE_URL` the API uses a file-backed PGlite database under
-`data/`, so this works with **no database server installed**.
-
-Single-process production mode (API serves the built SPA):
+`data/`, so this works with **no database server installed**. Check it with:
 
 ```bash
-npm run build               # builds the SPA into apps/web/dist
-npm start                   # API on :4000 also serves the SPA
+curl -s localhost:4000/api/health
+```
+
+Single-process production mode:
+
+```bash
+npm run build               # builds the Next.js API
+npm start                   # migrates the database, then serves on :4000
 ```
 
 If you are not sure whether an older server is still running, use the launcher
@@ -201,16 +173,15 @@ then signs in with OTP from the admin app and adds services, staff and branches.
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Runs API + web together |
+| `npm run dev` | Runs the API (Next.js dev server) on `:4000` |
 | `npm run seed` | Seeds the demo data into an **empty** database |
 | `npm run seed:reset` | Drops everything and reseeds the demo data (local only) |
 | `npm run seed:bootstrap` | Creates a clean live salon — no demo data. See [Neon database](#neon-database) |
-| `npm run build` | Typechecks and builds the customer SPA + PWA (`apps/web/dist`) |
-| `npm run build:admin` | Builds the dashboard-only bundle (`apps/web/dist-admin`, `VITE_APP_MODE=admin`) |
-| `npm start` | Runs the API (Next.js; migrates the database, still serves the built SPA when present) |
+| `npm run build` | Builds the Next.js API (`apps/next`) |
+| `npm start` | Runs the API (migrates the database, then serves on `:4000`) |
 | `bash scripts/serve.sh` | Kills a stale server on `:4000`, builds if needed, prints the phone URL, then starts |
-| `npm run typecheck` | TypeScript for core + Next + web (tests included) |
-| `npm test` | Everything: shared + core + Next parity + web |
+| `npm run typecheck` | TypeScript for the API packages (tests included) |
+| `npm test` | Everything: shared + core + Next parity |
 | `npm run test:api` | Core suite (database, routes, journeys, integrations) |
 | `npm run test:next` | The Next.js deployment surface (parity, cron auth, path handling) |
 | `npm run test:smoke` | Just the end-to-end journeys |
@@ -223,7 +194,7 @@ then signs in with OTP from the admin app and adds services, staff and branches.
 ## Android apps — React Native, two icons, one API
 
 The phones the salon actually uses run **native React Native apps** (the reference
-project's model), against the same API as the web app:
+project's model), against the SalonPro API:
 
 | App | Package | Source | Who uses it |
 |---|---|---|---|
@@ -234,7 +205,7 @@ Both are React Native 0.87 (Hermes, new architecture) with React Navigation 7,
 AsyncStorage sessions, a shared theme and component kit, and hand-drawn charts —
 so an Android build needs **no NDK-level styling dependencies**. Screens are
 styled with plain `StyleSheet` against `apps/mobile-shared/src/theme.ts`: the same
-blush/rose tokens the web app uses, with no NativeWind or Reanimated in the tree
+blush/rose SalonPro palette, with no NativeWind or Reanimated in the tree
 (they would pull in CMake/NDK work for no user-visible gain here).
 
 ### One shared codebase, two apps
@@ -310,13 +281,6 @@ a **Server address** screen reachable from sign-in and from More → Server addr
   provider connected, "Run now" queues messages and the screen says so **before**
   you tap.
 
-### Legacy: the Capacitor PWA shell
-
-`apps/web/android` and `apps/admin/android` are Capacitor projects that wrap the
-built web app as an APK (`bash scripts/build-apk.sh [admin]`). They still work and
-`npm run mobile:install` falls back to them, but the React Native apps are the
-shipped product.
-
 ## Demo accounts
 
 Password for all demo logins: **`salonpro123`**. Demo users are seeded with
@@ -336,17 +300,16 @@ refused when `NODE_ENV=production`.
 
 ## Testing
 
-The suite runs on Node's built-in test runner (shared/core/next) and Vitest (web).
+The suite runs on Node's built-in test runner.
 **No database server, network or external service is needed:** the harness drives
 the real router (the same one Next.js dispatches into on Vercel) against PGlite —
 real Postgres compiled to WebAssembly — seeded deterministically.
 
 ```bash
-npm test              # everything (240 tests)
+npm test              # everything (142 tests)
 npm run test:shared   # pure helpers: money, time, masking (9)
 npm run test:api      # database, routes, journeys, integrations (120)
 npm run test:next     # the Vercel/Next surface: parity, cron auth, 204/304 handling (13)
-npm run test:web      # mobile UX, pages, crash safety, server setting (98)
 npm run test:smoke    # just the end-to-end journeys (10)
 ```
 
@@ -360,11 +323,6 @@ What the suites cover:
 | **`smoke.test.ts`** | 10 | Whole journeys over HTTP: OTP sign-up → recharge → book from the wallet → receipt; cancel refunds and frees the slot; data export + account deletion; a completed visit reaching the dashboard, ledger, leaderboard, revenue report and audit log; the ₹50+₹50 referral paying out after qualification; then SQL invariants (no orphans, no overdrawn wallet, no half-written ledger row) |
 | **`integrations.test.ts`** | 8 | **Honesty:** the dev OTP mock labels itself and says "no real SMS was sent"; production **refuses with 503** rather than faking an OTP; notifications are never marked `sent` without a provider; opt-outs are `suppressed`; registering a push device creates no phantom delivery; `/api/health` reports every integration as `false` while unconfigured; **the production bootstrap creates a clean database** (1 user, 1 salon, 1 branch, 3 offers, zero of anything else) and its owner can sign in |
 | **existing API suites** | 73 | Auth/sessions, booking and the status machine, wallet maths and bonus-before-cash, payments and signature verification, referrals, RBAC and branch scoping, validation and error shapes, analytics |
-| **`mobile-ux.test.tsx`** | 21 | The mobile-app contracts: `viewport-fit=cover`, safe-area padding, `.card { min-width: 0 }`, **no `overflow-x: hidden` anywhere**, `overscroll-behavior`/tap-highlight off, `prefers-reduced-motion` (CSS + `MotionConfig`), the dock's items are siblings of one flex row with identical geometry, and the Android back button (back inside the app, double-press to exit, forgotten after 2 s) |
-| **`pages.test.tsx`** | 12 | Renders the real pages against a mocked API **twice with different payloads**, so a hardcoded number or a fabricated chart fails; error and empty states; premium-customer leaderboard order and phone masking |
-| **`crash-safety.test.tsx`** | 6 | The error boundary turns a thrown render error into a readable card with a reload button; `NumberTicker` renders `0` for a missing metric instead of blanking the screen |
-| **`server.test.tsx`** | 18 | Address handling for the packaged apps: bare addresses get a scheme, trailing `/` and `/api` are stripped, every request goes through the configured base (a relative `/api/...` fetch is unreachable inside the shell — that bug silently broke reschedule slots and the marketing-consent toggle), a wrong address is **never** reported as connected (HTML, `{ok:false}`, HTTP 500 and timeouts each get their own message), saving is followed by a reload, and the web sign-in is left uncluttered |
-| **existing web tests** | 41 | API client token/401/error shapes and downloads, every design-system primitive, full-app render smoke and route guards |
 
 ### Test architecture
 
@@ -377,9 +335,6 @@ What the suites cover:
   `lib/router.ts` + `server.ts` (`buildRouter()`/`dispatch()`) are side-effect
   free, so tests mount them without a scheduler — and `apps/next/app/api/[...path]`
   dispatches into exactly the same code in production.
-- `apps/web/test/setup.ts` wires `@testing-library/jest-dom`, cleans up between
-  tests, and shims `matchMedia`, `scrollTo` and `ResizeObserver` (recharts needs
-  the last one to size a chart in jsdom) for jsdom.
 
 `packages/core/src/**` is fully typechecked together with tests, so `npm run typecheck`
 fails on a broken test as well as broken app code.
@@ -405,8 +360,7 @@ Copy `.env.example` to `.env` (loaded by a tiny built-in parser — no `dotenv`)
 | `ALLOW_PAYMENT_SIMULATION` | `true` | Lets the built-in test checkout post signed payloads |
 | `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` | empty | WhatsApp delivery |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | empty | Web push |
-| `WEB_ORIGIN` | `http://localhost:5173` | CORS allow-list |
-| `SERVE_STATIC` | `true` | Serve the built SPA from the API |
+| `WEB_ORIGIN` | `http://localhost:5173` | Base URL used in message links (booking/referral) and the CORS allow-list. Point it at wherever those links should resolve |
 | `NODE_ENV` | `development` | `production` disables demo login, refuses to fake an OTP and excludes demo data |
 
 > Treat a production `DATABASE_URL` like a password: it grants full access to
@@ -460,14 +414,9 @@ salonpro/
 │   │   ├── lib/reminders.ts  # staleness guard + stampede collapse for the sweep
 │   │   ├── test/parity.test.ts          # 13 tests: the deployed surface
 │   │   └── vercel.json       # 2 daily cron jobs (free tier)
-│   ├── web/                  # React PWA (customer + dashboard bundles)
-│   │   ├── src/pages/        # customer/ and admin/ screens
-│   │   ├── src/lib/native.ts # Capacitor bridge (legacy shell): back button, haptics, share
-│   │   └── test/             # 98 tests (mobile UX, pages, crash safety, server setting)
 │   ├── mobile-shared/src/    # ONE source for both native apps (theme, api, endpoints, ui, auth)
 │   ├── mobile-customer/      # React Native app  → com.salonpro.app
-│   ├── mobile-admin/         # React Native app  → com.salonpro.admin
-│   └── admin/                # Capacitor shell for the admin PWA bundle (legacy)
+│   └── mobile-admin/         # React Native app  → com.salonpro.admin
 ├── packages/
 │   ├── core/                 # the whole server: routes, services, db, seed, auth
 │   │   ├── src/
@@ -483,7 +432,7 @@ salonpro/
 │   ├── build-mobile-apks.sh  # sync shared code → gradle assembleRelease → artifacts/
 │   ├── sync-mobile-shared.sh # copy apps/mobile-shared into both apps
 │   ├── install-apks.sh       # adb install over USB
-│   ├── build-next.sh         # web build + next build check
+│   ├── build-next.sh         # build the Next.js API
 │   └── serve.sh              # restart the server cleanly on :4000
 ├── .github/workflows/reminders.yml      # cron fallback that survives Hobby limits
 ├── artifacts/                # built APKs (gitignored — share them as files)
@@ -513,8 +462,14 @@ salonpro/
 - **Push notifications** need a Firebase project and `google-services.json` placed
   in the app; without it the admin app records that no device is registered rather
   than claiming a push was delivered.
-- The hosted deployment (`apps/next` → Vercel) still needs **your** Vercel login to
-  run `vercel --prod`, and `SALONPRO_API_BASE` must then be rebuilt into the APKs.
+- Customer message templates still build a booking/referral link from
+  `WEB_ORIGIN`. With the browser surface removed those URLs don't resolve yet —
+  point `WEB_ORIGIN` at a future booking page or drop the links when a WhatsApp
+  provider is connected (nothing is sent today without one).
+- The hosted deployment (`apps/next` → Vercel) still needs **your** Vercel login.
+  Step-by-step walkthrough: **`DEPLOY.md`** (import the repo, Root Directory
+  `apps/next`, three env vars — then `SALONPRO_API_BASE` can be rebuilt into the
+  APKs, or set once in the app's server screen).
 - The API is reachable wherever you host it; on a LAN the phones must be on the
   same Wi-Fi, and the apps' Server address screen is the fix when they are not.
 

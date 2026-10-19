@@ -4,8 +4,6 @@ node_modules/
 .pnp.js
 
 # --- build output -----------------------------------------------------------
-dist/
-dist-admin/
 build/
 *.tsbuildinfo
 coverage/
@@ -17,15 +15,6 @@ data/*.db-wal
 data/*.db-shm
 data/uploads/
 
-# --- Capacitor / Gradle -----------------------------------------------------
-# Web assets are copied into the native projects by `npx cap sync`.
-apps/*/android/app/src/main/assets/public/
-apps/*/android/app/build/
-apps/*/android/build/
-apps/*/android/.gradle/
-apps/*/android/local.properties
-apps/*/android/capacitor-cordova-android-plugins/
-
 # Signing material must never be committed.
 *.keystore
 *.jks
@@ -35,6 +24,8 @@ keystore.properties
 .env
 .env.*
 !.env.example
+# Values to paste into Vercel (see DEPLOY.md) — generated locally, never committed
+deploy-secrets.local.txt
 
 # --- editors / OS -----------------------------------------------------------
 .idea/
