@@ -300,7 +300,7 @@ a **Server address** screen reachable from sign-in and from More → Server addr
   (`react-native-razorpay`), so once the salon's keys are configured on the
   server the sheet opens in test mode and the server verifies the signature.
   With no keys the same flow runs against the server's signed simulation, and a
-  build without the SDK says *"no payment sheet is installed in this build"*
+  build without the SDK says *"This build has no Razorpay sheet installed"*
   instead of pretending a payment happened.
 - The phone never decides that money moved: orders are created on the server, and
   a payment only becomes `paid` after **server-side signature verification** (or a
