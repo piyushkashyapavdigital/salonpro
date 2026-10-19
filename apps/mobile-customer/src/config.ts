@@ -7,7 +7,7 @@
  * salon. The release script rewrites this file from `SALONPRO_API_BASE` so a
  * published APK points at the hosted API out of the box.
  */
-export const BUILD_API_BASE = 'http://192.168.1.34:4000';
+export const BUILD_API_BASE = 'https://salonpro-rosy.vercel.app';
 
 /** One-tap options shown next to the address field. */
 export const SERVER_PRESETS: string[] = [
