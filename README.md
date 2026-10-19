@@ -295,9 +295,12 @@ a **Server address** screen reachable from sign-in and from More → Server addr
 
 ### Money in the apps, honestly
 
-- **Wallet and pay-at-salon work today.** Card/UPI checkout uses the Razorpay
-  native SDK if it is installed in the app; when it is not, the app says
-  *"no payment sheet is installed in this build"* and offers the other methods
+- **Wallet and pay-at-salon work today.** Wallet recharges can also be paid by
+  card/UPI: the customer app ships the Razorpay native SDK
+  (`react-native-razorpay`), so once the salon's keys are configured on the
+  server the sheet opens in test mode and the server verifies the signature.
+  With no keys the same flow runs against the server's signed simulation, and a
+  build without the SDK says *"no payment sheet is installed in this build"*
   instead of pretending a payment happened.
 - The phone never decides that money moved: orders are created on the server, and
   a payment only becomes `paid` after **server-side signature verification** (or a
@@ -502,9 +505,11 @@ salonpro/
 - The Android APKs are **debug** builds signed with the debug keystore — fine for
   sharing directly, but they cannot be published on the Play Store and Android
   shows the usual "unknown sources" warnings.
-- **Card/UPI inside the native apps** needs the Razorpay React Native SDK added to
-  `apps/mobile-customer` (a pure Java/Kotlin module). Until it is, the checkout
-  helper says so plainly and wallet / pay-at-salon remain fully usable.
+- Card/UPI checkout in the customer app now opens the real Razorpay sheet —
+  `react-native-razorpay` is installed and autolinked. It stays on the honest
+  simulated path until the salon's Razorpay keys are set on the server, and the
+  admin app deliberately has no payment sheet: it records money that arrived,
+  it does not take it.
 - **Push notifications** need a Firebase project and `google-services.json` placed
   in the app; without it the admin app records that no device is registered rather
   than claiming a push was delivered.
