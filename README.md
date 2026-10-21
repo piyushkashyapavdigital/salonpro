@@ -211,7 +211,7 @@ opens:
 
 | App | Package | Source | Version |
 |---|---|---|---|
-| **SalonPro (unified)** | `com.salonpro.app` | `apps/mobile/` | 2.0.0 |
+| **SalonPro (unified)** | `com.salonpro.app` | `apps/mobile/` | 2.0.2 |
 | Frozen reference | `com.salonpro.app` | `apps/mobile-customer/` | 1.0.5 |
 | Frozen reference | `com.salonpro.admin` | `apps/mobile-admin/` | 1.0.5 |
 
@@ -251,11 +251,12 @@ runs `./gradlew assembleRelease`. It reads `versionName` from
 label. Output lands in `artifacts/`:
 
 ```
-artifacts/mobile-customer-2.0.0.apk      (com.salonpro.app, unified)
+artifacts/mobile-customer-2.0.2.apk      (com.salonpro.app, unified)
 ```
 
-The `mobile-customer-` prefix is intentional for 2.0.0: installed 1.0.5 customer
-updaters look for that prefix. It is an asset name, not the app's identity.
+The `mobile-customer-` prefix is intentional since 2.0.0: installed 1.0.5
+customer updaters look for that prefix. It is an asset name, not the app's
+identity.
 
 Prerequisites: **JDK 17**, the Android SDK (`platform-tools`, `platforms;android-36`,
 `build-tools;37.0.0`), and — because React Native's app module compiles a small
@@ -273,7 +274,7 @@ Install over USB:
 
 ```bash
 bash scripts/install-apks.sh       # restarts adb, waits for authorization, installs the built APK
-adb install -r artifacts/mobile-customer-2.0.0.apk
+adb install -r artifacts/mobile-customer-2.0.2.apk
 ```
 
 The old `com.salonpro.admin` app is retired. Android will not install a different
@@ -302,11 +303,13 @@ by hand. Every release after that can install from inside the app.
    The script names the file after `versionName`:
    `artifacts/mobile-customer-<version>.apk` (the legacy prefix is what installed
    1.0.5 customer updaters search for).
-3. Create a GitHub release (for example tag `mobile-2.0.0`), upload the APK
+3. Create a GitHub release (for example tag `mobile-2.0.2`), upload the APK
    **with that exact file name**, and publish it — not a draft, not a
    pre-release.
 4. Installed 1.0.4+ apps offer it on the next launch, on returning to the app,
-   or from the manual check. The 1.0.5 → 2.0.0 path is the first unified update.
+   or from the manual check. The 1.0.5 → 2.0.0 path is the first unified update;
+   the 2.0.0 → 2.0.1 and 2.0.1 → 2.0.2 paths were exercised on an Android
+   emulator.
 
 The updater picks the newest published release that has a matching asset,
 compares the version in the file name with the installed `versionName`, then
