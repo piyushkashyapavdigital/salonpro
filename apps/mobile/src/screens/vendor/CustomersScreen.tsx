@@ -31,7 +31,7 @@ export function CustomersScreen() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.head}>
+      <View style={styles.listHead}>
         <Text style={styles.title}>Customers</Text>
         <View style={styles.tabs}>
           <Chip label="Directory" active={mode === 'directory'} onPress={() => setMode('directory')} />
@@ -370,6 +370,7 @@ export function CustomerDetailScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.canvas },
+  listHead: { paddingHorizontal: space(4), paddingTop: space(3), gap: space(2) },
   head: { flexDirection: 'row', alignItems: 'center', gap: space(3), paddingHorizontal: space(4), paddingVertical: space(3) },
   title: { fontSize: font.size.xl, fontWeight: font.weight.bold, color: colors.ink900, flexShrink: 1 },
   tabs: { flexDirection: 'row', gap: space(2), marginVertical: space(2) },
