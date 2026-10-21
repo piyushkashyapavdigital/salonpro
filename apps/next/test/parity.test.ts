@@ -10,7 +10,7 @@
  * Everything runs against the throwaway in-memory PGlite the API tests use.
  */
 import './setup-env';
-import test, { after, before, describe } from 'node:test';
+import { test, beforeAll as before, afterAll as after, describe } from 'bun:test';
 import assert from 'node:assert/strict';
 import { ensureSchema } from '@salonpro/core/db';
 import { ACCOUNTS, getHarness, type Harness } from '../../../packages/core/test/harness';

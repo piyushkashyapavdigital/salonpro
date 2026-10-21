@@ -11,6 +11,7 @@ import { NavigationContainer, DefaultTheme, type Theme } from '@react-navigation
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, isAdminRole, useAuth } from './src/shared/auth';
 import { Banner, Button, Loading } from './src/shared/components';
+import { UpdateProvider } from './src/shared/updates';
 import { colors, space } from './src/shared/theme';
 import { RootNavigator } from './src/navigation';
 
@@ -53,9 +54,11 @@ export default function App() {
     <SafeAreaProvider>
       <StatusBar barStyle="dark-content" />
       <AuthProvider>
-        <NavigationContainer theme={navTheme}>
-          <Gate />
-        </NavigationContainer>
+        <UpdateProvider>
+          <NavigationContainer theme={navTheme}>
+            <Gate />
+          </NavigationContainer>
+        </UpdateProvider>
       </AuthProvider>
     </SafeAreaProvider>
   );

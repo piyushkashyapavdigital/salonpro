@@ -10,8 +10,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 echo "── building the Next.js API ────────────────────────────────────────"
-npm --workspace @salonpro/next run build
+bun --filter @salonpro/next build
 
 echo
-echo "Built. Start it with:  npm start        (or bash scripts/serve.sh)"
+echo "Built. Start it with:  bun start        (or bash scripts/serve.sh)"
 echo "  API   http://localhost:4000/api/health"

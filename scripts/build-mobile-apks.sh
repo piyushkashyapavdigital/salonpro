@@ -31,11 +31,31 @@ case "$TARGET" in
   *) echo "usage: bash scripts/build-mobile-apks.sh [both|customer|admin]" >&2; exit 2 ;;
 esac
 
+BUILT=()
+
 echo "── syncing shared sources"
 bash "$ROOT/scripts/sync-mobile-shared.sh"
 
 build_app() {
   local app_dir="$1" label="$2"
+
+  # The version in android/app/build.gradle is the single source of truth: it
+  # becomes versionName (shown to Android), the APK's file name (which the
+  # in-app updater parses), and APP_VERSION (shown in the UI).
+  local version_name
+  version_name="$(sed -nE 's/.*versionName "([^"]+)".*/\1/p' "$app_dir/android/app/build.gradle" | head -1)"
+  if [ -z "$version_name" ]; then
+    echo "!! $label: no versionName in android/app/build.gradle" >&2
+    exit 1
+  fi
+  echo "── $label: version $version_name"
+  python3 - "$app_dir/src/config.ts" "$version_name" <<'PY'
+import pathlib, re, sys
+path, version = pathlib.Path(sys.argv[1]), sys.argv[2]
+text = path.read_text()
+text = re.sub(r"export const APP_VERSION = '[^']*';", f"export const APP_VERSION = '{version}';", text)
+path.write_text(text)
+PY
 
   if [ -n "${SALONPRO_API_BASE:-}" ]; then
     echo "── $label: baking API address $SALONPRO_API_BASE"
@@ -80,8 +100,9 @@ PY
   mkdir -p "$ROOT/artifacts"
   local slug out
   slug="$(basename "$app_dir")"
-  out="$ROOT/artifacts/${slug}-1.0.3.apk"
+  out="$ROOT/artifacts/${slug}-${version_name}.apk"
   cp "$apk" "$out"
+  BUILT+=("$out")
   printf '✅ %s → %s (%s)\n' "$label" "$out" "$(du -h "$out" | cut -f1)"
 }
 
@@ -89,6 +110,12 @@ if [ "$WANT_CUSTOMER" = 1 ]; then build_app "$ROOT/apps/mobile-customer" "custom
 if [ "$WANT_ADMIN" = 1 ]; then build_app "$ROOT/apps/mobile-admin" "admin app"; fi
 
 echo
+echo "Built:"
+for apk in "${BUILT[@]}"; do echo "  $apk"; done
+echo
 echo "Install on a connected phone:"
-echo "  adb install -r artifacts/mobile-customer-1.0.3.apk"
-echo "  adb install -r artifacts/mobile-admin-1.0.3.apk"
+echo "  adb install -r <apk>     (or: bash scripts/install-apks.sh)"
+echo
+echo "To publish an in-app update: upload these exact file names to a GitHub"
+echo "release that is neither a draft nor a pre-release. Installed 1.0.4+ builds"
+echo "will offer the install from inside the app."

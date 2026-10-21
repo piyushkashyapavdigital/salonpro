@@ -8,7 +8,7 @@ build/
 *.tsbuildinfo
 coverage/
 
-# --- local database (recreate with `npm run seed -- --reset`) ---------------
+# --- local database (recreate with `bun run seed:reset`) -------------------
 data/*.db
 data/*.db-journal
 data/*.db-wal
@@ -41,4 +41,4 @@ artifacts/*.apk
 
 # --- logs -------------------------------------------------------------------
 *.log
-npm-debug.log*
+bun-debug.log*

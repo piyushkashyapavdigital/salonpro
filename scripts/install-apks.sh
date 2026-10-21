@@ -18,9 +18,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# The signed release APKs the salon installs (built by scripts/build-mobile-apks.sh).
-RN_CUSTOMER="artifacts/mobile-customer-1.0.2.apk"
-RN_ADMIN="artifacts/mobile-admin-1.0.2.apk"
+# The newest signed release APK for each app (built by scripts/build-mobile-apks.sh).
+newest_apk() {
+  ls -1t artifacts/$1 2>/dev/null | head -1 || true
+}
+RN_CUSTOMER="$(newest_apk 'mobile-customer-*.apk')"
+RN_ADMIN="$(newest_apk 'mobile-admin-*.apk')"
 
 if ! command -v adb >/dev/null 2>&1; then
   echo "ERROR: adb not found on PATH." >&2
@@ -46,13 +49,13 @@ done
 echo "    phone ready: $(adb devices | awk '/device$/{print $1; exit}')"
 
 install_one() {
-  local apk="$1" name="$2"
+  local apk="${1:-}" name="$2"
   echo
-  if [ -f "$apk" ]; then
+  if [ -n "$apk" ] && [ -f "$apk" ]; then
     echo "==> [3/4] installing $name"
     adb install -r "$apk"
   else
-    echo "==> [3/4] skipping $name — not built yet ($apk)"
+    echo "==> [3/4] skipping $name — not built yet"
   fi
 }
 

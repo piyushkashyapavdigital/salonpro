@@ -25,9 +25,9 @@ short-lived instances and the pooler multiplexes them.
 1. <https://vercel.com> → **Add New… → Project** → **Import** the GitHub repo
    `piyushkashyapavdigital/salonpro`.
 2. **Root Directory → `apps/next`** (click *Edit* next to it). This single
-   setting is the important one: the repo root is an npm workspace, Vercel
-   installs dependencies from the repo root, and the build then runs inside
-   `apps/next`. The framework (Next.js) is detected automatically.
+   setting is the important one: the repo root is a **Bun workspace**, Vercel
+   sees the `bun.lock` at the repo root and installs with Bun, and the build then
+   runs inside `apps/next`. The framework (Next.js) is detected automatically.
 3. **Environment Variables** — add these for Production (and Preview if you
    like). `SESSION_SECRET` and `CRON_SECRET` are in `deploy-secrets.local.txt`
    (generated for you; keep that file off git — it already is):
@@ -89,7 +89,7 @@ shows no red.
 | Symptom | Cause / fix |
 |---|---|
 | Build fails with "No Next.js version detected" | The project's **Root Directory** is not `apps/next` |
-| Build fails resolving `@salonpro/core` | Same cause — import the repo through Git (dashboard) so the whole workspace is uploaded. Do **not** run the Vercel CLI from inside `apps/next`; it uploads only that folder. From the repo root, prefer the dashboard or `npx vercel --cwd apps/next`. |
+| Build fails resolving `@salonpro/core` | Same cause — import the repo through Git (dashboard) so the whole workspace is uploaded. Do **not** run the Vercel CLI from inside `apps/next`; it uploads only that folder. From the repo root, prefer the dashboard or `bunx vercel --cwd apps/next`. |
 | `/api/internal/reminders` answers 503 | `CRON_SECRET` is unset — deliberate; set it |
 | Sign-in says it cannot send a code (503) | No SMS provider configured and `ALLOW_DEV_OTP` is off — exactly the promise: it never pretends an SMS was sent |
-| Razorpay sheet doesn't appear in the APK build | The APK in the release includes `react-native-razorpay`; a **rebuild from source** needs `npm install` inside `apps/mobile-customer` first |
+| Razorpay sheet doesn't appear in the APK build | The APK in the release includes `react-native-razorpay`; a **rebuild from source** needs `bun install` inside `apps/mobile-customer` first |

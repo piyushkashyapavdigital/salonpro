@@ -1,5 +1,5 @@
 /**
- * Build-time configuration for the customer app.
+ * Build-time configuration for the admin app.
  *
  * `BUILD_API_BASE` is where this build looks for the API by default. It is only
  * a default: the sign-in screen has a "Salon server address" card that stores a
@@ -15,5 +15,8 @@ export const SERVER_PRESETS: string[] = [
   'http://10.0.2.2:4000',
 ];
 
-export const APP_VERSION = '1.0.0';
-export const APP_NAME = 'SalonPro';
+export const APP_VERSION = '1.0.4';
+export const APP_NAME = 'SalonPro Admin';
+
+/** Which APK this is — selects the matching asset from the GitHub release. */
+export const APP_FLAVOR: 'customer' | 'admin' = 'admin';

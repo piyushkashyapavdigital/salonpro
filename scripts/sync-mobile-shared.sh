@@ -2,7 +2,7 @@
 # Copy the code the two mobile apps share into each app.
 #
 # Metro resolves modules relative to the app directory, and the apps are
-# deliberately NOT npm workspaces (hoisting React Native's native packages breaks
+# deliberately NOT Bun workspaces (hoisting React Native's native packages breaks
 # Gradle's autolinking), so the shared sources are copied rather than linked.
 #
 #   bash scripts/sync-mobile-shared.sh

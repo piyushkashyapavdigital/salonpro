@@ -177,12 +177,14 @@ export async function notifyCustomer(args: NotifyArgs): Promise<NotificationReco
   let status: NotificationStatus = 'queued';
   let errorDetails: string | null = null;
 
-  if (withinQuietHours(pref)) {
-    status = 'pending';
-    errorDetails = 'suppressed_quiet_hours';
-  } else if (!channelAllowed(channel, pref, stage)) {
+  // An opt-out is final: it must read as "suppressed" even at 3am, rather than
+  // looking like a quiet-hours deferral that might still be sent later.
+  if (!channelAllowed(channel, pref, stage)) {
     status = 'suppressed';
     errorDetails = 'customer_opted_out';
+  } else if (withinQuietHours(pref)) {
+    status = 'pending';
+    errorDetails = 'suppressed_quiet_hours';
   }
 
   const id = crypto.randomUUID();

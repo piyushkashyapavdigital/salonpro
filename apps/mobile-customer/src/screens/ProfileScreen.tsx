@@ -15,11 +15,12 @@ import { useAsync } from '../shared/hooks';
 import { Avatar, Banner, Button, Card, Loading, Row, SectionTitle } from '../shared/components';
 import { colors, font, radius, shadow, space } from '../shared/theme';
 import { formatDate, formatMoney } from '../core';
-import { APP_VERSION } from '../config';
+import { useAppUpdate } from '../shared/updates';
 
 export function ProfileScreen() {
   const navigation = useNavigation<any>();
   const { user, signOut } = useAuth();
+  const { check, checking, currentVersion } = useAppUpdate();
   const profile = useAsync(() => customer.profile(), []);
   const [busy, setBusy] = useState(false);
 
@@ -118,12 +119,18 @@ export function ProfileScreen() {
               <MenuRow icon="card-giftcard" label="Refer a friend" onPress={() => navigation.navigate('Referral')} />
               <MenuRow icon="notifications-none" label="Messages from the salon" onPress={() => navigation.navigate('Notifications')} />
               <MenuRow icon="dns" label="Salon server address" hint={getApiBase()} onPress={() => navigation.navigate('ServerSettings')} />
+              <MenuRow
+                icon="system-update"
+                label="Check for updates"
+                hint={checking ? 'Checking GitHub…' : `Version ${currentVersion}`}
+                onPress={() => void check({ manual: true })}
+              />
             </Card>
 
             <SectionTitle title="Account" />
             <Card>
               <Text style={styles.about}>
-                Signed in as {user?.role?.replace(/_/g, ' ') ?? 'customer'}. {APP_VERSION} · API {getApiBase()}
+                Signed in as {user?.role?.replace(/_/g, ' ') ?? 'customer'}. {currentVersion} · API {getApiBase()}
               </Text>
               <Button label="Sign out" variant="secondary" onPress={confirmSignOut} style={{ marginTop: space(3) }} />
               <Button

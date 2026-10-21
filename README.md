@@ -1,8 +1,8 @@
 # SalonPro
 
 A salon platform: a customer app, a salon-staff (admin) app, and **one API** —
-backed by a persistent database. A soft blush / rose interface — rounded white
-cards, pink accents, bottom tab navigation — shipped as two installable React
+backed by a persistent database. A playful, high-contrast interface — hot-magenta over warm cream, candy accents,
+rounded white cards, bottom tab navigation — shipped as two installable React
 Native APKs (customer + salon staff) that talk to one Next.js API.
 
 > **Honesty first.** This deployment runs Razorpay in **simulated** mode and OTP
@@ -21,6 +21,7 @@ Native APKs (customer + salon staff) that talk to one Next.js API.
 | DB | **Postgres** — Neon (`pg`) in production, **PGlite** (Postgres in WASM) locally and in tests | One SQL dialect everywhere; the test suite needs no database server |
 | Validation | `zod` | One schema per boundary |
 | Scheduling | Vercel Cron (2 daily jobs, free-tier limit) + an in-process sweep on API traffic + a GitHub Actions workflow for brute-force retries | Reminders go out without a second server |
+| Tooling | **Bun** — package manager, runtime and test runner | One tool for install, scripts and tests; no npm/yarn/pnpm and no Node needed |
 
 Money is stored as **integer paise** everywhere. The wallet is an **append-only
 ledger**; balances are always derived from the sum of posted rows — the
@@ -45,7 +46,7 @@ the caller's transaction when nested, and uses `AsyncLocalStorage` so every
 statement inside a request runs on the transaction's own connection.
 
 `migrate()` runs the (idempotent) schema statement by statement and is called on
-boot, so a fresh Neon database becomes usable on the first `npm start`.
+boot, so a fresh Neon database becomes usable on the first `bun start`.
 
 
 ---
@@ -58,11 +59,12 @@ into the customer and admin apps so they cannot drift apart.
 
 | Token | Meaning |
 |---|---|
-| `colors.brand*` | Rose accent (`#EC4899` core) — primary buttons, active tabs, badges, charts |
-| `colors.ink*` | Warm blush-tinted neutrals — `ink50` is the app canvas, `ink100` the hairline border, `300`–`500` muted text, `700`–`950` headings and numbers |
+| `colors.brand*` | Hot-magenta accent (`#FF2E88` core) — primary buttons, active tabs, badges, charts |
+| `colors.canvas` / `colors.ink*` | The warm-cream app canvas (`#FFF7F2`) over warm plum-ink neutrals — `ink100` the hairline border, `300`–`500` muted text, `700`–`950` headings and numbers |
 | `colors.mint` / `amber` / `rose` / `sky` | Success / warning / danger / info |
-| `gradients` | The blush-gradient hero cards (wallet balance, revenue, referrals) |
-| `space()`, `radius`, `font`, `shadow` | One spacing scale, rounded-card radii, the soft rose-tinted card shadow |
+| `colors.lilac` / `coral` / `lemon` / `grape` / `accents` | The candy accents that give cards and quick actions some colour |
+| `gradients` | Hero gradients — `header` is violet→magenta (the home/overview hero), `primary` the button fill |
+| `space()`, `radius`, `font`, `shadow` | One spacing scale, generous rounded-card radii, the soft plum-tinted card shadow |
 | `statusColors()` / `STATUS_LABEL` | Every appointment/payment status colour and label in one place |
 
 The kit is plain React over `StyleSheet` — no NativeWind, no Reanimated, no CSS
@@ -78,10 +80,13 @@ with a reload button instead of a blank white screen.
 
 ## Quick start
 
+Requires **[Bun](https://bun.sh) ≥ 1.2** — the whole repo uses Bun as the package
+manager and runtime; Node, npm, yarn and pnpm are not needed.
+
 ```bash
-npm install
-npm run seed:reset          # create + populate the demo database
-npm run dev                 # API on :4000
+bun install
+bun run seed:reset          # create + populate the demo database
+bun run dev                 # API on :4000
 ```
 
 With no `DATABASE_URL` the API uses a file-backed PGlite database under
@@ -94,12 +99,12 @@ curl -s localhost:4000/api/health
 Single-process production mode:
 
 ```bash
-npm run build               # builds the Next.js API
-npm start                   # migrates the database, then serves on :4000
+bun run build               # builds the Next.js API
+bun start                   # migrates the database, then serves on :4000
 ```
 
 If you are not sure whether an older server is still running, use the launcher
-instead of a bare `npm start` — it stops the stale one first, then starts a
+instead of a bare `bun start` — it stops the stale one first, then starts a
 single fresh server, so it never fails with `EADDRINUSE`:
 
 ```bash
@@ -118,17 +123,17 @@ DATABASE_URL='postgresql://user:password@ep-xxxx-pooler.region.aws.neon.tech/neo
 ```
 
 ```bash
-npm start        # creates the schema on boot if it is missing, then serves
+bun start        # creates the schema on boot if it is missing, then serves
 ```
 
-`npm start` calls `migrate()`, so pointing the app at an empty Neon database and
+`bun start` calls `migrate()`, so pointing the app at an empty Neon database and
 starting it is all the setup there is. Verify with the health endpoint:
 
 ```bash
 curl -s localhost:4000/api/health      # → { ok, integrations: {…}, database: "postgres" }
 ```
 
-> **Demo data vs. a live salon.** `npm run seed:reset` is for local demos only:
+> **Demo data vs. a live salon.** `bun run seed:reset` is for local demos only:
 > it **drops every table** and fills the database with sample customers,
 > appointments and payments. Never run it against a real salon's database.
 > For a real one use the bootstrap below, which creates a clean salon and
@@ -145,7 +150,7 @@ BOOTSTRAP_OWNER_PHONE=9812345678 \
 BOOTSTRAP_OWNER_NAME="Deepa Menon" \
 BOOTSTRAP_SALON_NAME="Blush Studio" \
 BOOTSTRAP_ADDRESS="12 MG Road, Bengaluru" \
-npm run seed:bootstrap
+bun run seed:bootstrap
 ```
 
 | Variable | Required | Default |
@@ -157,11 +162,11 @@ npm run seed:bootstrap
 | `BOOTSTRAP_CONTACT` | no | — |
 | `BOOTSTRAP_BRANCH` | no | `<salon name> — Main branch` |
 
-Environment variables are the supported route because `npm run` swallows
+Environment variables are the supported route because `bun run` swallows
 unknown `--flags`. To pass flags instead, call the CLI directly:
 
 ```bash
-BOOTSTRAP_OWNER_PHONE=9812345678 npm run seed:bootstrap   # optional: BOOTSTRAP_OWNER_NAME=… BOOTSTRAP_SALON_NAME=…
+BOOTSTRAP_OWNER_PHONE=9812345678 bun run seed:bootstrap   # optional: BOOTSTRAP_OWNER_NAME=… BOOTSTRAP_SALON_NAME=…
 ```
 
 Running it twice is safe: if a salon already exists it does nothing. The owner
@@ -173,23 +178,23 @@ then signs in with OTP from the admin app and adds services, staff and branches.
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Runs the API (Next.js dev server) on `:4000` |
-| `npm run seed` | Seeds the demo data into an **empty** database |
-| `npm run seed:reset` | Drops everything and reseeds the demo data (local only) |
-| `npm run seed:bootstrap` | Creates a clean live salon — no demo data. See [Neon database](#neon-database) |
-| `npm run build` | Builds the Next.js API (`apps/next`) |
-| `npm start` | Runs the API (migrates the database, then serves on `:4000`) |
+| `bun run dev` | Runs the API (Next.js dev server) on `:4000` |
+| `bun run seed` | Seeds the demo data into an **empty** database |
+| `bun run seed:reset` | Drops everything and reseeds the demo data (local only) |
+| `bun run seed:bootstrap` | Creates a clean live salon — no demo data. See [Neon database](#neon-database) |
+| `bun run build` | Builds the Next.js API (`apps/next`) |
+| `bun start` | Runs the API (migrates the database, then serves on `:4000`) |
 | `bash scripts/serve.sh` | Kills a stale server on `:4000`, builds if needed, prints the phone URL, then starts |
-| `npm run typecheck` | TypeScript for the API packages (tests included) |
-| `npm test` | Everything: shared + core + Next parity |
-| `npm run test:api` | Core suite (database, routes, journeys, integrations) |
-| `npm run test:next` | The Next.js deployment surface (parity, cron auth, path handling) |
-| `npm run test:smoke` | Just the end-to-end journeys |
-| `npm run mobile:sync` | Copy `apps/mobile-shared/src` into both React Native apps |
-| `npm run mobile:apks` | Build both release APKs into `artifacts/` |
-| `npm run mobile:install` | Install whichever APKs are built over USB (`adb`) |
-| `cd apps/mobile-customer && npm test` | The app's jest smoke test: renders the whole app and unmounts it (same in `apps/mobile-admin`) |
-| `cd apps/mobile-customer && npx tsc --noEmit` | Typecheck a native app, tests included (same in `apps/mobile-admin`) |
+| `bun run typecheck` | TypeScript for the API packages (tests included) |
+| `bun run test` | Everything: shared + core + Next parity |
+| `bun run test:api` | Core suite (database, routes, journeys, integrations) |
+| `bun run test:next` | The Next.js deployment surface (parity, cron auth, path handling) |
+| `bun run test:smoke` | Just the end-to-end journeys |
+| `bun run mobile:sync` | Copy `apps/mobile-shared/src` into both React Native apps |
+| `bun run mobile:apks` | Build both release APKs into `artifacts/` |
+| `bun run mobile:install` | Install whichever APKs are built over USB (`adb`) |
+| `cd apps/mobile-customer && bun run test` | The app's jest smoke test: renders the whole app and unmounts it (same in `apps/mobile-admin`) |
+| `cd apps/mobile-customer && bunx tsc --noEmit` | Typecheck a native app, tests included (same in `apps/mobile-admin`) |
 
 ## Android apps — React Native, two icons, one API
 
@@ -205,17 +210,18 @@ Both are React Native 0.87 (Hermes, new architecture) with React Navigation 7,
 AsyncStorage sessions, a shared theme and component kit, and hand-drawn charts —
 so an Android build needs **no NDK-level styling dependencies**. Screens are
 styled with plain `StyleSheet` against `apps/mobile-shared/src/theme.ts`: the same
-blush/rose SalonPro palette, with no NativeWind or Reanimated in the tree
-(they would pull in CMake/NDK work for no user-visible gain here).
+hot-magenta-over-cream SalonPro palette, with no NativeWind or Reanimated in the
+tree (they would pull in CMake/NDK work for no user-visible gain here).
 
 ### One shared codebase, two apps
 
 `apps/mobile-shared/src/` holds everything both apps use — theme, API client,
-endpoint map, types, auth provider, UI components, hooks, server-address card and
-the checkout helper. `scripts/sync-mobile-shared.sh` **copies** it into each app's
-`src/shared/` (plus `packages/shared/src` → `src/core/`), and every copied file
-carries a `GENERATED FILE` header. Edit the shared sources and re-run the script
-(also done automatically by the APK build); never edit the copies.
+endpoint map, types, auth provider, UI components, hooks, server-address card,
+the checkout helper and the in-app updater. `scripts/sync-mobile-shared.sh`
+**copies** it into each app's `src/shared/` (plus `packages/shared/src` →
+`src/core/`), and every copied file carries a `GENERATED FILE` header. Edit the
+shared sources and re-run the script (also done automatically by the APK build);
+never edit the copies.
 
 ### Build the APKs
 
@@ -227,11 +233,13 @@ SALONPRO_API_BASE=https://salonpro.vercel.app bash scripts/build-mobile-apks.sh
 
 Each build syncs the shared sources, bakes the API address into `src/config.ts`
 when `SALONPRO_API_BASE` is set, copies the Material icon font into the APK and
-runs `./gradlew assembleRelease`. Output lands in `artifacts/`:
+runs `./gradlew assembleRelease`. It also reads `versionName` from
+`android/app/build.gradle` and uses it for the file name and the in-app version
+label. Output lands in `artifacts/`:
 
 ```
-artifacts/mobile-customer-1.0.3.apk      (com.salonpro.app)
-artifacts/mobile-admin-1.0.3.apk         (com.salonpro.admin)
+artifacts/mobile-customer-1.0.4.apk      (com.salonpro.app)
+artifacts/mobile-admin-1.0.4.apk         (com.salonpro.admin)
 ```
 
 Prerequisites: **JDK 17**, the Android SDK (`platform-tools`, `platforms;android-36`,
@@ -248,8 +256,48 @@ Install over USB:
 
 ```bash
 bash scripts/install-apks.sh       # restarts adb, waits for authorization, installs both
-adb install -r artifacts/mobile-customer-1.0.3.apk
+adb install -r artifacts/mobile-customer-1.0.4.apk
 ```
+
+### In-app updates — no more GitHub by hand
+
+From **1.0.4**, both apps check GitHub Releases when they start (and at most
+once every 10 minutes when returning to the foreground). If a newer build
+exists, a native Android dialog offers it, the APK downloads with an in-app
+progress bar, and Android's package installer opens. There is also a
+**Check for updates** row in **Profile → Shortcuts** (customer) and
+**More → This device** (admin).
+
+The first build that contains the updater — **1.0.4** — has to be installed once
+by hand. Every release after that can install from inside the app.
+
+**Publish an update:**
+
+1. Bump `versionCode` **and** `versionName` in the app's
+   `android/app/build.gradle` (and repeat if both apps changed).
+2. Build:
+   ```bash
+   SALONPRO_API_BASE=https://salonpro-rosy.vercel.app bash scripts/build-mobile-apks.sh
+   ```
+   The script names the files after `versionName`:
+   `artifacts/mobile-customer-<version>.apk` and
+   `artifacts/mobile-admin-<version>.apk`.
+3. Create a GitHub release (for example tag `mobile-1.0.5`), upload those APKs
+   **with those exact file names**, and publish it — not a draft, not a
+   pre-release.
+4. Installed 1.0.4+ apps offer it on the next launch, on returning to the app,
+   or from the manual check.
+
+The updater picks the newest published release that has a matching asset,
+compares the version in the file name with the installed `versionName`, then
+checks the downloaded APK's package name and `versionCode` (and GitHub's
+SHA-256 digest when the API supplies one) before opening the installer. Android
+additionally refuses any APK signed with a different key — so keep using the
+same debug keystore.
+
+Android always shows its own install confirmation: an ordinary app cannot
+install silently (that needs device-owner provisioning). The win is that nobody
+visits GitHub, downloads a file, or hunts through the Downloads folder.
 
 ### Which server do the apps talk to?
 
@@ -300,17 +348,17 @@ refused when `NODE_ENV=production`.
 
 ## Testing
 
-The suite runs on Node's built-in test runner.
+The suite runs on **Bun's test runner**.
 **No database server, network or external service is needed:** the harness drives
 the real router (the same one Next.js dispatches into on Vercel) against PGlite —
 real Postgres compiled to WebAssembly — seeded deterministically.
 
 ```bash
-npm test              # everything (142 tests)
-npm run test:shared   # pure helpers: money, time, masking (9)
-npm run test:api      # database, routes, journeys, integrations (120)
-npm run test:next     # the Vercel/Next surface: parity, cron auth, 204/304 handling (13)
-npm run test:smoke    # just the end-to-end journeys (10)
+bun run test          # everything (148 tests)
+bun run test:shared   # pure helpers: money, time, masking (9)
+bun run test:api      # database, routes, journeys, integrations (126)
+bun run test:next     # the Vercel/Next surface: parity, cron auth, 204/304 handling (13)
+bun run test:smoke    # just the end-to-end journeys (10)
 ```
 
 What the suites cover:
@@ -335,8 +383,13 @@ What the suites cover:
   `lib/router.ts` + `server.ts` (`buildRouter()`/`dispatch()`) are side-effect
   free, so tests mount them without a scheduler — and `apps/next/app/api/[...path]`
   dispatches into exactly the same code in production.
+- Bun's runner runs **every test file in one process**, so that harness is a
+  process-wide singleton and its `close()` is a deliberate no-op: the server is
+  unref'd and the in-memory database dies with the process. The tests import from
+  `bun:test`; `test/bun-shim.d.ts` maps that module onto Node's test types so
+  `tsc` typechecks the suite without pulling in `@types/bun`.
 
-`packages/core/src/**` is fully typechecked together with tests, so `npm run typecheck`
+`packages/core/src/**` is fully typechecked together with tests, so `bun run typecheck`
 fails on a broken test as well as broken app code.
 
 ---

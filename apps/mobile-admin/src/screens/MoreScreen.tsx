@@ -17,11 +17,12 @@ import { useAsync } from '../shared/hooks';
 import { Avatar, Badge, Banner, Button, Card, Row, SectionTitle } from '../shared/components';
 import { colors, font, radius, shadow, space } from '../shared/theme';
 import { formatMoney } from '../core';
-import { APP_VERSION } from '../config';
+import { useAppUpdate } from '../shared/updates';
 
 export function MoreScreen() {
   const navigation = useNavigation<any>();
   const { user, signOut } = useAuth();
+  const { check, checking, currentVersion } = useAppUpdate();
   const me = useAsync(() => admin.me(), []);
 
   const capabilities = me.data?.capabilities ?? {};
@@ -77,9 +78,15 @@ export function MoreScreen() {
         <SectionTitle title="This device" />
         <Card padded={false}>
           <MenuRow icon="dns" label="Server address" hint={getApiBase()} onPress={() => navigation.navigate('ServerSettings')} />
+          <MenuRow
+            icon="system-update"
+            label="Check for updates"
+            hint={checking ? 'Checking GitHub…' : `Version ${currentVersion}`}
+            onPress={() => void check({ manual: true })}
+          />
         </Card>
         <Card>
-          <Row label="App version" value={APP_VERSION} />
+          <Row label="App version" value={currentVersion} />
           <Row label="Signed in as" value={user?.role?.replace(/_/g, ' ') ?? 'staff'} />
           {me.data?.branches?.length ? (
             <Row label="Branches" value={me.data.branches.filter((branch) => branch.status === 'active').map((branch) => branch.name).join(', ')} />

@@ -1,4 +1,4 @@
-import test, { after, before, beforeEach, describe } from 'node:test';
+import { test, beforeAll as before, afterAll as after, beforeEach, describe } from 'bun:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
@@ -93,9 +93,12 @@ async function requestOtpInChildProcess(extraEnv: Record<string, string>) {
       await closeDatabase();
     `;
 
+  /* Run the same code in a fresh process so a module-level env read (production
+   * mode, no OTP provider) is exercised for real. Bun runs the TypeScript
+   * directly — no loader needed. */
   const { stdout } = await run(
     process.execPath,
-    ['--import', 'tsx', '--input-type=module', '--eval', script],
+    ['--eval', script],
     {
       cwd: apiRoot,
       env: {

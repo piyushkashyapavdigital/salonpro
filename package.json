@@ -8,27 +8,26 @@
     "apps/next"
   ],
   "scripts": {
-    "dev": "npm --workspace @salonpro/next run dev",
+    "dev": "bun --filter @salonpro/next dev",
     "build": "bash scripts/build-next.sh",
-    "start": "npm --workspace @salonpro/next run start",
-    "seed": "npm --workspace @salonpro/core run seed",
-    "test": "npm --workspace @salonpro/shared run test && npm --workspace @salonpro/core run test && npm --workspace @salonpro/next run test",
-    "test:api": "npm --workspace @salonpro/core run test",
-    "test:next": "npm --workspace @salonpro/next run test",
-    "test:shared": "npm --workspace @salonpro/shared run test",
-    "typecheck": "npm --workspace @salonpro/core run typecheck && npm --workspace @salonpro/next run typecheck",
-    "seed:reset": "npm --workspace @salonpro/core run seed:reset",
-    "seed:bootstrap": "npm --workspace @salonpro/core run bootstrap",
-    "test:smoke": "npm --workspace @salonpro/core run smoke",
+    "start": "bun --filter @salonpro/next start",
+    "seed": "bun --filter @salonpro/core seed",
+    "test": "bun --filter @salonpro/shared test && bun --filter @salonpro/core test && bun --filter @salonpro/next test",
+    "test:api": "bun --filter @salonpro/core test",
+    "test:next": "bun --filter @salonpro/next test",
+    "test:shared": "bun --filter @salonpro/shared test",
+    "typecheck": "bun --filter @salonpro/core typecheck && bun --filter @salonpro/next typecheck",
+    "seed:reset": "bun --filter @salonpro/core seed:reset",
+    "seed:bootstrap": "bun --filter @salonpro/core bootstrap",
+    "test:smoke": "bun --filter @salonpro/core smoke",
     "mobile:sync": "bash scripts/sync-mobile-shared.sh",
     "mobile:apks": "bash scripts/build-mobile-apks.sh",
     "mobile:install": "bash scripts/install-apks.sh"
   },
   "engines": {
-    "node": ">=22.5"
+    "bun": ">=1.2.0"
   },
-  "allowScripts": {
-    "esbuild@0.28.2": true,
-    "esbuild@0.25.12": true
-  }
+  "trustedDependencies": [
+    "esbuild"
+  ]
 }

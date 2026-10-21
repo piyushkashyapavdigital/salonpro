@@ -6,7 +6,7 @@
 #   PORT=4100 bash scripts/serve.sh  # use another port
 #   SKIP_BUILD=1 bash scripts/serve.sh   # start the existing build untouched
 #
-# Use this instead of a bare `npm start` when you are not sure whether an older
+# Use this instead of a bare `bun start` when you are not sure whether an older
 # server is still running: it stops the stale one first instead of failing with
 # EADDRINUSE. Run it in YOUR OWN terminal — servers started in the agent's
 # background shells are killed whenever the environment restarts, which is what
@@ -26,7 +26,6 @@ fi
 # pattern from matching this script's own command line.
 pkill -f "[n]ext start"          >/dev/null 2>&1 || true
 pkill -f "[n]ext-server"         >/dev/null 2>&1 || true
-pkill -f "[t]sx src/index.ts"    >/dev/null 2>&1 || true
 pkill -f "[s]alonpro/api"        >/dev/null 2>&1 || true
 
 # Give the OS a moment to release the socket.
@@ -45,7 +44,7 @@ fi
 # --- 2. build when there is no usable build ----------------------------------
 if [ "${SKIP_BUILD:-0}" != "1" ] && [ ! -f apps/next/.next/BUILD_ID ]; then
   echo "No Next.js build found — building (this takes a minute; Ctrl+C to skip"
-  echo "and run 'npm run dev' for the fast dev server instead)."
+  echo "and run 'bun run dev' for the fast dev server instead)."
   echo
   bash scripts/build-next.sh
   echo
@@ -65,4 +64,4 @@ echo "  stop with Ctrl+C"
 echo
 
 # --- 4. start ----------------------------------------------------------------
-PORT="$PORT" exec npm start
+PORT="$PORT" exec bun start

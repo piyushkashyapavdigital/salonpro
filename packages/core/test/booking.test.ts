@@ -1,4 +1,4 @@
-import { test, before, after, beforeEach } from 'node:test';
+import { test, beforeAll as before, afterAll as after, beforeEach } from 'bun:test';
 import assert from 'node:assert/strict';
 import { getHarness, ACCOUNTS, dayFrom, type Harness } from './harness';
 
@@ -176,7 +176,11 @@ test('a booking can be rescheduled to another available slot', async () => {
     customer,
   );
   const target = avail.data.slots[0];
-  const moved = await h.post(`/customer/bookings/${id}/reschedule`, { date: dayFrom(5), startTime: target.startTime }, customer);
+  const moved = await h.post(
+    `/customer/bookings/${id}/reschedule`,
+    { date: dayFrom(5), startTime: target.startTime, staffId: target.staffId },
+    customer,
+  );
   assert.equal(moved.status, 200);
   assert.equal(moved.data.appointment.date, dayFrom(5));
   assert.equal(moved.data.appointment.startTime, target.startTime);

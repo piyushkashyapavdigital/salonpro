@@ -1,9 +1,9 @@
 /**
  * Data seeding for SalonPro.
  *
- *   npm run seed                          demo data (development & tests)
- *   npm run seed -- --reset               drop everything, then reseed demo data
- *   npm run seed -- --bootstrap --phone 98xxxxxxxx [--owner "Name"] [--salon "Name"] [--address "…"]
+ *   bun run seed                          demo data (development & tests)
+ *   bun run seed:reset                    drop everything, then reseed demo data
+ *   bun run seed:bootstrap -- --phone 98xxxxxxxx [--owner "Name"] [--salon "Name"] [--address "…"]
  *                                         production bootstrap: one salon, one owner,
  *                                         one branch and the standard recharge offers.
  *                                         No demo customers, appointments or staff.
@@ -639,11 +639,13 @@ function argValue(flag: string): string | undefined {
 
 /**
  * Values for the bootstrap can come from the command line or the environment.
- * Environment variables are the reliable route through npm, which swallows
- * flags it does not recognise:
+ * Environment variables are the reliable route, because a package runner can
+ * swallow flags it does not recognise:
  *
  *   BOOTSTRAP_OWNER_PHONE=98… BOOTSTRAP_OWNER_NAME="Deepa Menon" \
- *   BOOTSTRAP_SALON_NAME="Blush Studio" npm run bootstrap
+ *   BOOTSTRAP_SALON_NAME="Blush Studio" bun run seed:bootstrap
+ *
+ * Or pass them through explicitly:  bun run seed:bootstrap -- --phone 98…
  */
 function bootstrapOptions() {
   return {

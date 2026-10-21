@@ -1,4 +1,4 @@
-import test, { after, before, beforeEach, describe } from 'node:test';
+import { test, beforeAll as before, afterAll as after, beforeEach, describe } from 'bun:test';
 import assert from 'node:assert/strict';
 import { ACCOUNTS, dayFrom, getHarness, tick, type Harness } from './harness';
 

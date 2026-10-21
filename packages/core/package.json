@@ -5,12 +5,12 @@
   "type": "module",
   "main": "src/server.ts",
   "scripts": {
-    "seed": "tsx src/seed.ts",
-    "test": "node --import tsx --test test/*.test.ts",
+    "seed": "bun src/seed.ts",
+    "test": "bun test --timeout 120000",
     "typecheck": "tsc --noEmit",
-    "seed:reset": "tsx src/seed.ts --reset",
-    "bootstrap": "tsx src/seed.ts --bootstrap",
-    "smoke": "node --import tsx --test test/smoke.test.ts"
+    "seed:reset": "bun src/seed.ts --reset",
+    "bootstrap": "bun src/seed.ts --bootstrap",
+    "smoke": "bun test test/smoke.test.ts --timeout 120000"
   },
   "dependencies": {
     "@salonpro/shared": "*",
@@ -21,7 +21,6 @@
     "@electric-sql/pglite": "^0.5.10",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.23.1",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },
   "exports": {

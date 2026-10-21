@@ -83,6 +83,10 @@ async function build(): Promise<Harness> {
   const server: Server = createNodeServer();
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
+  /* Bun's test runner runs every file in one process with a shared module
+   * graph, so this harness is a true singleton. Unref the server so it does not
+   * keep the process alive once the tests finish. */
+  server.unref();
   const { port } = server.address() as AddressInfo;
   const base = `http://127.0.0.1:${port}/api`;
 
@@ -131,8 +135,11 @@ async function build(): Promise<Harness> {
     },
     db,
     async close() {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      await db.closeDatabase();
+      /* No-op on purpose. Node's test runner forks a process per file, but
+       * Bun's runs them all in one process sharing this module instance — so
+       * closing the server and database here would break every other file that
+       * has not run yet. The server is unref'd and the in-memory database is
+       * torn down with the process. */
     },
   };
   return harness;
