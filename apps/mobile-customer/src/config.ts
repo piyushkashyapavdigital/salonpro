@@ -15,7 +15,7 @@ export const SERVER_PRESETS: string[] = [
   'http://10.0.2.2:4000',
 ];
 
-export const APP_VERSION = '1.0.4';
+export const APP_VERSION = '1.0.5';
 export const APP_NAME = 'SalonPro';
 
 /** Which APK this is — selects the matching asset from the GitHub release. */
