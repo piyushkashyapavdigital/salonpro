@@ -335,6 +335,10 @@ export interface SalonReview {
   salonId: string;
   rating: number;
   message: string;
+  /** Set when the review was opened from the customer's signed-in visit. */
+  customerId: string | null;
+  /** The completed visit this review belongs to, when it was linked. */
+  appointmentId: string | null;
   customerName: string | null;
   customerPhone: string | null;
   /** True only when the customer was sent to Google after a 4–5★ rating. */

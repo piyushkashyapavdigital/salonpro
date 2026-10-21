@@ -6,14 +6,14 @@
  * labelled as waiting for the friend's first paid visit, exactly as the server
  * tracks them.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { Alert, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { customer } from '../../shared/endpoints';
 import { useAsync } from '../../shared/hooks';
-import { Avatar, Badge, Banner, Button, Card, Empty, Loading, Row, SectionTitle, StatTile } from '../../shared/components';
+import { AppSheet, Avatar, Badge, Banner, Button, Card, Empty, Loading, Row, SectionTitle, StatTile, type SheetRequest } from '../../shared/components';
 import { colors, font, radius, shadow, space } from '../../shared/theme';
 import { formatMoney } from '../../core';
 
@@ -21,6 +21,7 @@ export function ReferralScreen() {
   const navigation = useNavigation<any>();
   const referrals = useAsync(() => customer.referrals(), []);
   const data = referrals.data;
+  const [sheet, setSheet] = useState<SheetRequest | null>(null);
 
   const share = async () => {
     if (!data) return;
@@ -30,7 +31,7 @@ export function ReferralScreen() {
     try {
       await Share.share({ message, title: 'Join me at the salon' });
     } catch {
-      Alert.alert('Your referral code', `${data.code}\n\n${data.link}`);
+      setSheet({ tone: 'info', title: 'Your referral code', message: `${data.code}\n\n${data.link}` });
     }
   };
 
@@ -80,7 +81,7 @@ export function ReferralScreen() {
                   <Text style={styles.payoutValue}>{formatMoney(data.creditedRewards)}</Text>
                 </View>
                 {data.pendingRewards > 0 ? (
-                  <Badge label={`${formatMoney(data.pendingRewards)} pending`} bg={colors.amberSoft} fg="#B45309" />
+                  <Badge label={`${formatMoney(data.pendingRewards)} pending`} bg={colors.amberSoft} fg={colors.amber} />
                 ) : null}
               </View>
             </Card>
@@ -154,6 +155,7 @@ export function ReferralScreen() {
           </>
         ) : null}
       </ScrollView>
+      <AppSheet request={sheet} onClose={() => setSheet(null)} />
     </SafeAreaView>
   );
 }

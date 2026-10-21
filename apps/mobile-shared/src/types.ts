@@ -175,6 +175,20 @@ export interface BookingsResponse {
   appointments: Appointment[];
 }
 
+/** A short-lived hand-off from the signed-in customer to the hosted review page. */
+export interface ReviewLinkResponse {
+  alreadyReviewed: boolean;
+  salonId: string;
+  appointmentId: string;
+  visitDate: string;
+  token: string | null;
+  path: string | null;
+  expiresAt: string | null;
+}
+
+/** Seeded accounts the developer PIN can open directly on a demo server. */
+export type DevLoginRole = 'super_admin' | 'salon_owner' | 'branch_manager' | 'receptionist' | 'customer';
+
 export interface BookingResponse {
   appointment: Appointment;
   paymentPreference: 'wallet' | 'online' | 'pay_at_salon';

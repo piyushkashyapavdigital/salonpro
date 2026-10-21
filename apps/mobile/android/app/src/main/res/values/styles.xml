@@ -1,9 +1,10 @@
 <resources>
 
-    <!-- Base application theme. -->
+    <!-- Base application theme. The window background is the brand evergreen so
+         the launch hand-off from the launcher icon into the app is seamless. -->
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <item name="android:windowBackground">@color/splash_background</item>
     </style>
 
 </resources>

@@ -13,13 +13,11 @@
  *   1. ask GitHub for the newest published releases;
  *   2. pick the asset for this app (`mobile-customer-…` / `mobile-admin-…`);
  *   3. compare its version with the installed `versionName`;
- *   4. native Alert → download with progress → Android installer.
+ *   4. show a SalonPro sheet → download with progress → Android installer.
  *
  * The installer always shows its own confirmation. Silent installation needs
- * device-owner privileges, which a normally installed app does not have.
- *
- * The first build that contains this module (1.0.4) must be installed by hand;
- * every release after that can arrive through this screen.
+ * device-owner privileges, which a normally installed app does not have. The
+ * app-owned prompt, notes, permission explanation and progress are all custom.
  */
 import React, {
   createContext,
@@ -32,7 +30,7 @@ import React, {
 } from 'react';
 import {
   ActivityIndicator,
-  Alert,
+  Animated,
   AppState,
   DeviceEventEmitter,
   Modal,
@@ -42,8 +40,8 @@ import {
   View,
 } from 'react-native';
 import { APP_FLAVOR, APP_NAME, APP_VERSION } from '../config';
-import { ProgressBar } from './components';
-import { colors, font, radius, shadow, space } from './theme';
+import { BrandMark, Button, ProgressBar } from './components';
+import { colors, font, motion, radius, shadow, space } from './theme';
 
 const REPO = 'piyushkashyapavdigital/salonpro';
 const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases?per_page=10`;
@@ -72,6 +70,22 @@ export type UpdateInfo = {
 };
 
 type DownloadProgress = { percent: number; received: number; total: number };
+
+type DialogAction = {
+  label: string;
+  variant?: 'primary' | 'secondary' | 'danger';
+  onPress?: () => void;
+};
+
+type DialogState = {
+  tone: 'update' | 'permission' | 'info' | 'error';
+  kicker: string;
+  title: string;
+  message: string;
+  notes?: string;
+  primary: DialogAction;
+  secondary?: DialogAction;
+};
 
 type UpdateContextValue = {
   /** The installed build's versionName, read from Android (falls back to config). */
@@ -201,12 +215,100 @@ function shortNotes(notes: string): string {
   if (!notes) return '';
   const lines = notes
     .split('\n')
-    .map((line) => line.trim())
+    .map((line) => line.trim().replace(/^[-*]\s+/, '• '))
     .filter((line) => line.length > 0 && !line.startsWith('#') && !line.startsWith('<!--'))
-    .slice(0, 4);
+    .slice(0, 5);
   if (!lines.length) return '';
   const text = lines.join('\n');
-  return text.length > 400 ? `${text.slice(0, 397)}…` : text;
+  return text.length > 480 ? `${text.slice(0, 477)}…` : text;
+}
+
+/* ------------------------------------------------------------------ */
+/* Custom modal                                                        */
+/* ------------------------------------------------------------------ */
+
+function SheetModal({
+  visible,
+  children,
+  onRequestClose,
+}: {
+  visible: boolean;
+  children: React.ReactNode;
+  onRequestClose?: () => void;
+}) {
+  const enter = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!visible) return;
+    enter.setValue(0);
+    Animated.spring(enter, {
+      toValue: 1,
+      useNativeDriver: true,
+      ...motion.spring,
+    }).start();
+  }, [enter, visible]);
+
+  return (
+    <Modal visible={visible} transparent animationType="none" statusBarTranslucent onRequestClose={onRequestClose}>
+      <Animated.View style={[styles.backdrop, { opacity: enter }]}>
+        <Animated.View
+          style={[
+            styles.sheet,
+            {
+              transform: [
+                { translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [32, 0] }) },
+                { scale: enter.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) },
+              ],
+            },
+          ]}
+        >
+          {children}
+        </Animated.View>
+      </Animated.View>
+    </Modal>
+  );
+}
+
+function DialogView({ dialog, onClose }: { dialog: DialogState; onClose: () => void }) {
+  const run = (action: DialogAction) => {
+    onClose();
+    action.onPress?.();
+  };
+
+  return (
+    <>
+      <View style={styles.dialogHead}>
+        <BrandMark size={48} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.kicker}>{dialog.kicker}</Text>
+          <Text style={styles.dialogTitle}>{dialog.title}</Text>
+        </View>
+      </View>
+      <Text style={styles.dialogMessage}>{dialog.message}</Text>
+      {dialog.notes ? (
+        <View style={styles.notesBox}>
+          <Text style={styles.notesLabel}>WHAT’S NEW</Text>
+          <Text style={styles.notesText}>{dialog.notes}</Text>
+        </View>
+      ) : null}
+      <View style={styles.actions}>
+        {dialog.secondary ? (
+          <Button
+            label={dialog.secondary.label}
+            variant="secondary"
+            onPress={() => run(dialog.secondary!)}
+            style={{ flex: 1 }}
+          />
+        ) : null}
+        <Button
+          label={dialog.primary.label}
+          variant={dialog.primary.variant ?? 'primary'}
+          onPress={() => run(dialog.primary)}
+          style={{ flex: 1 }}
+        />
+      </View>
+    </>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -219,6 +321,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState<DownloadProgress>({ percent: 0, received: 0, total: 0 });
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [dialog, setDialog] = useState<DialogState | null>(null);
 
   const versionRef = useRef(currentVersion);
   const promptedVersion = useRef<string | null>(null);
@@ -261,112 +364,143 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     const allowed = await native.canInstallPackages().catch(() => false);
     if (!allowed) {
       pendingPermission.current = target;
-      Alert.alert(
-        'Allow updates from SalonPro',
-        `Android needs your permission before ${APP_NAME} can open the installer.\n\nTurn on “Allow from this source”, then come back — the download starts automatically.`,
-        [
-          {
-            text: 'Not now',
-            style: 'cancel',
-            onPress: () => {
-              pendingPermission.current = null;
-            },
-          },
-          {
-            text: 'Open settings',
-            onPress: () => {
-              void native.openInstallPermissionSettings().catch(() => {
-                Alert.alert(
-                  'Open Settings yourself',
-                  'Go to Settings → Apps → SalonPro → Install unknown apps and allow it.',
-                );
+      setDialog({
+        tone: 'permission',
+        kicker: 'ONE-TIME ANDROID PERMISSION',
+        title: 'Allow updates from SalonPro',
+        message:
+          `Android needs your permission before ${APP_NAME} can open the installer. ` +
+          'Tap “Open settings”, turn on “Allow from this source”, then come back — the download starts automatically.',
+        primary: {
+          label: 'Open settings',
+          onPress: () => {
+            void native.openInstallPermissionSettings().catch(() => {
+              setDialog({
+                tone: 'info',
+                kicker: 'OPEN SETTINGS MANUALLY',
+                title: 'One small step',
+                message: 'Go to Settings → Apps → SalonPro → Install unknown apps and allow it, then return here.',
+                primary: { label: 'Got it' },
               });
-            },
+            });
           },
-        ],
-      );
+        },
+        secondary: {
+          label: 'Not now',
+          onPress: () => {
+            pendingPermission.current = null;
+          },
+        },
+      });
       return;
     }
 
     setUpdate(target);
+    setDialog(null);
     setProgress({ percent: 0, received: 0, total: target.size });
     setDownloading(true);
     try {
       // The promise resolves once Android's installer is on screen.
       await native.downloadAndInstall(target.downloadUrl, target.assetName, target.digest);
     } catch (error) {
-      Alert.alert(
-        'Update did not install',
-        error instanceof Error ? error.message : 'The update could not be installed. Please try again.',
-      );
+      setDialog({
+        tone: 'error',
+        kicker: 'UPDATE INTERRUPTED',
+        title: 'The update did not install',
+        message: error instanceof Error ? error.message : 'The update could not be installed. Please try again.',
+        primary: { label: 'Try again', onPress: () => void install(target) },
+        secondary: { label: 'Close' },
+      });
     } finally {
       if (alive.current) setDownloading(false);
     }
   }, []);
 
-  const check = useCallback(async (options?: { manual?: boolean }) => {
-    const manual = options?.manual ?? false;
+  const check = useCallback(
+    async (options?: { manual?: boolean }) => {
+      const manual = options?.manual ?? false;
 
-    if (!native) {
-      if (manual) {
-        Alert.alert(
-          'Updates unavailable in this build',
-          'This APK predates in-app updates. Install the latest build from the GitHub release once; every release after that installs from inside the app.',
-        );
-      }
-      return;
-    }
-    if (checkInFlight.current || downloadingRef.current) return;
-
-    checkInFlight.current = true;
-    if (manual) setChecking(true);
-    try {
-      const latest = await fetchLatest();
-      lastCheck.current = Date.now();
-
-      if (!latest) {
+      if (!native) {
         if (manual) {
-          Alert.alert('No update published', `There is no newer ${APP_NAME} build on GitHub yet.`);
+          setDialog({
+            tone: 'info',
+            kicker: 'UPDATES UNAVAILABLE',
+            title: 'This build predates in-app updates',
+            message:
+              'Install the latest APK from the GitHub release once. Every release after that can be installed from inside SalonPro.',
+            primary: { label: 'Got it' },
+          });
         }
         return;
       }
+      if (checkInFlight.current || downloadingRef.current) return;
 
-      if (!isNewer(latest.version, versionRef.current)) {
-        setUpdate(null);
-        if (manual) {
-          Alert.alert('You’re up to date', `${APP_NAME} ${versionRef.current} is the newest published version.`);
+      checkInFlight.current = true;
+      if (manual) setChecking(true);
+      try {
+        const latest = await fetchLatest();
+        lastCheck.current = Date.now();
+
+        if (!latest) {
+          if (manual) {
+            setDialog({
+              tone: 'info',
+              kicker: 'NO RELEASE YET',
+              title: 'No update published',
+              message: `There is no newer ${APP_NAME} build on GitHub yet.`,
+              primary: { label: 'Got it' },
+            });
+          }
+          return;
         }
-        return;
-      }
 
-      setUpdate(latest);
-      if (!manual && promptedVersion.current === latest.version) return;
-      promptedVersion.current = latest.version;
+        if (!isNewer(latest.version, versionRef.current)) {
+          setUpdate(null);
+          if (manual) {
+            setDialog({
+              tone: 'info',
+              kicker: 'ALL CAUGHT UP',
+              title: 'You’re up to date',
+              message: `${APP_NAME} ${versionRef.current} is the newest published version.`,
+              primary: { label: 'Nice' },
+            });
+          }
+          return;
+        }
 
-      const notes = shortNotes(latest.notes);
-      const size = latest.size > 0 ? ` Download size: ${formatBytes(latest.size)}.` : '';
-      Alert.alert(
-        'Update available',
-        `${APP_NAME} ${latest.version} is ready — you have ${versionRef.current}.${size}` +
-          (notes ? `\n\nWhat’s new:\n${notes}` : '') +
-          '\n\nDownload it now? Android’s installer opens when it is ready.',
-        [
-          { text: 'Not now', style: 'cancel' },
-          { text: 'Update now', onPress: () => void install(latest) },
-        ],
-      );
-    } catch (error) {
-      if (manual) {
-        Alert.alert(
-          'Could not check for updates',
-          error instanceof Error ? error.message : 'Try again in a moment.',
-        );
+        setUpdate(latest);
+        if (!manual && promptedVersion.current === latest.version) return;
+        promptedVersion.current = latest.version;
+
+        const notes = shortNotes(latest.notes);
+        const size = latest.size > 0 ? ` Download size: ${formatBytes(latest.size)}.` : '';
+        setDialog({
+          tone: 'update',
+          kicker: 'NEW BUILD AVAILABLE',
+          title: `${APP_NAME} ${latest.version} is ready`,
+          message: `You are on ${versionRef.current}.${size} Android’s installer opens when the download is ready.`,
+          notes: notes || undefined,
+          primary: { label: 'Update now', onPress: () => void install(latest) },
+          secondary: { label: 'Later' },
+        });
+      } catch (error) {
+        if (manual) {
+          setDialog({
+            tone: 'error',
+            kicker: 'UPDATE CHECK FAILED',
+            title: 'Could not check for updates',
+            message: error instanceof Error ? error.message : 'Try again in a moment.',
+            primary: { label: 'Try again', onPress: () => void check({ manual: true }) },
+            secondary: { label: 'Close' },
+          });
+        }
+      } finally {
+        checkInFlight.current = false;
+        if (manual && alive.current) setChecking(false);
       }
-    } finally {
-      checkInFlight.current = false;
-      if (manual && alive.current) setChecking(false);
-    }
-  }, [install]);
+    },
+    [install],
+  );
 
   /* Download progress comes from the native module. */
   useEffect(() => {
@@ -408,10 +542,14 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
             if (allowed) {
               void install(pending);
             } else {
-              Alert.alert(
-                'Permission still off',
-                'Turn on “Allow from this source” for SalonPro, then tap “Check for updates” again.',
-              );
+              setDialog({
+                tone: 'permission',
+                kicker: 'PERMISSION STILL OFF',
+                title: 'One more try',
+                message:
+                  'Turn on “Allow from this source” for SalonPro, then tap “Check for updates” again. Android will not let the app install without it.',
+                primary: { label: 'Got it' },
+              });
             }
           })
           .catch(() => {});
@@ -437,40 +575,38 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
   return (
     <UpdateContext.Provider value={value}>
       {children}
-      <Modal
-        visible={downloading}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => {}}
-      >
-        <View style={styles.backdrop}>
-          <View style={styles.sheet}>
+      <SheetModal visible={Boolean(dialog)} onRequestClose={() => setDialog(null)}>
+        {dialog ? <DialogView dialog={dialog} onClose={() => setDialog(null)} /> : null}
+      </SheetModal>
+
+      <SheetModal visible={downloading}>
+        <View style={styles.progressHead}>
+          <BrandMark size={44} />
+          <View style={{ flex: 1 }}>
             <Text style={styles.kicker}>SALONPRO UPDATE</Text>
-            <Text style={styles.title}>
+            <Text style={styles.progressTitle}>
               {update ? `Downloading ${update.version}` : 'Downloading update'}
-            </Text>
-            <Text style={styles.size}>
-              {formatBytes(progress.received)}
-              {progress.total > 0 ? ` of ${formatBytes(progress.total)}` : ''}
-            </Text>
-
-            {progress.total > 0 ? (
-              <View style={styles.progressBlock}>
-                <ProgressBar ratio={progress.percent / 100} />
-                <Text style={styles.percent}>{Math.round(progress.percent)}%</Text>
-              </View>
-            ) : (
-              <ActivityIndicator color={colors.brand500} style={styles.spinner} />
-            )}
-
-            <Text style={styles.hint}>
-              Keep the app open. Android’s installer opens when the download finishes — tap
-              “Update” there to finish.
             </Text>
           </View>
         </View>
-      </Modal>
+        <Text style={styles.size}>
+          {formatBytes(progress.received)}
+          {progress.total > 0 ? ` of ${formatBytes(progress.total)}` : ''}
+        </Text>
+
+        {progress.total > 0 ? (
+          <View style={styles.progressBlock}>
+            <ProgressBar ratio={progress.percent / 100} />
+            <Text style={styles.percent}>{Math.round(progress.percent)}%</Text>
+          </View>
+        ) : (
+          <ActivityIndicator color={colors.brand500} style={styles.spinner} />
+        )}
+
+        <Text style={styles.hint}>
+          Keep the app open. Android’s installer opens when the download finishes — tap “Update” there to finish.
+        </Text>
+      </SheetModal>
     </UpdateContext.Provider>
   );
 }
@@ -478,29 +614,59 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: '#170B1FB8',
+    backgroundColor: 'rgba(11, 59, 52, 0.62)',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: space(6),
+    padding: space(5),
   },
   sheet: {
     width: '100%',
-    maxWidth: 380,
+    maxWidth: 390,
     backgroundColor: colors.white,
     borderRadius: radius.xl,
     padding: space(5),
-    gap: space(2),
+    gap: space(3),
     ...shadow.raised,
   },
+  dialogHead: { flexDirection: 'row', alignItems: 'center', gap: space(3) },
   kicker: {
-    fontSize: font.size.xs,
+    fontSize: 10,
     fontWeight: font.weight.heavy,
-    letterSpacing: 1.4,
+    letterSpacing: 1.5,
     color: colors.brand600,
   },
-  title: {
-    fontSize: font.size.lg,
+  dialogTitle: {
+    marginTop: 3,
+    fontFamily: font.family.display,
+    fontSize: font.size.xl,
+    fontWeight: font.weight.bold,
+    color: colors.ink900,
+    letterSpacing: -0.4,
+    lineHeight: 26,
+  },
+  dialogMessage: { fontSize: font.size.sm, color: colors.ink600, lineHeight: 21 },
+  notesBox: {
+    backgroundColor: colors.canvas,
+    borderWidth: 1,
+    borderColor: colors.ink100,
+    borderRadius: radius.md,
+    padding: space(3.5),
+    gap: space(1.5),
+  },
+  notesLabel: {
+    fontSize: 9,
     fontWeight: font.weight.heavy,
+    letterSpacing: 1.2,
+    color: colors.ink400,
+  },
+  notesText: { fontSize: font.size.sm, color: colors.ink700, lineHeight: 20 },
+  actions: { flexDirection: 'row', gap: space(2), marginTop: space(1) },
+  progressHead: { flexDirection: 'row', alignItems: 'center', gap: space(3) },
+  progressTitle: {
+    marginTop: 3,
+    fontFamily: font.family.display,
+    fontSize: font.size.lg,
+    fontWeight: font.weight.bold,
     color: colors.ink900,
     letterSpacing: -0.3,
   },

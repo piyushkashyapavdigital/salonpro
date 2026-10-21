@@ -14,6 +14,9 @@ data/*.db-journal
 data/*.db-wal
 data/*.db-shm
 data/uploads/
+# PGlite stores a whole Postgres instance as a directory tree.
+data/pglite/
+data/screens.db/
 
 # Signing material must never be committed.
 *.keystore

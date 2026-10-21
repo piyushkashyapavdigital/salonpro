@@ -51,6 +51,8 @@ import type {
   PlatformVendorsResponse,
   ProfileResponse,
   RechargeOffersResponse,
+  ReviewLinkResponse,
+  DevLoginRole,
   ReferralsResponse,
   Referral,
   ReferralInfoResponse,
@@ -96,7 +98,7 @@ export const auth = {
    * Demo servers only: sign in with the developer PIN. Omit `phone` to sign in
    * as the salon owner. The server refuses this unless ALLOW_DEV_OTP is on.
    */
-  devLogin: (body: { pin: string; phone?: string }) =>
+  devLogin: (body: { pin: string; phone?: string; role?: DevLoginRole }) =>
     api<SessionResponse>('/auth/dev-login', { method: 'POST', body, anonymous: true }),
 
   invite: (body: { name: string; phone: string; role: string; branchId?: string; email?: string }) =>
@@ -184,6 +186,8 @@ export const customer = {
   notifications: () => api<NotificationsResponse>('/customer/notifications'),
   retryNotification: (id: string) => api<{ ok: true }>(`/customer/notifications/${id}/retry`, { method: 'POST' }),
   referrals: () => api<ReferralsResponse>('/customer/referrals'),
+  reviewLink: (appointmentId?: string) =>
+    api<ReviewLinkResponse>('/customer/reviews/link', { method: 'POST', body: { appointmentId } }),
   pushSubscription: (body: { token: string; platform: string }) =>
     api<{ ok: true; mode?: string }>('/customer/push-subscription', { method: 'POST', body }),
   requestAccountDeletion: (body: { reason?: string; confirm: true }) =>

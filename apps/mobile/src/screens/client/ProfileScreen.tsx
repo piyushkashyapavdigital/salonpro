@@ -4,7 +4,7 @@
  * the server address and sign-out.
  */
 import React, { useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -12,7 +12,7 @@ import { useAuth } from '../../shared/auth';
 import { getApiBase } from '../../shared/api';
 import { customer } from '../../shared/endpoints';
 import { useAsync } from '../../shared/hooks';
-import { Avatar, Banner, Button, Card, Loading, Row, SectionTitle } from '../../shared/components';
+import { AppSheet, Avatar, Banner, Button, Card, Loading, Row, SectionTitle, type SheetRequest } from '../../shared/components';
 import { colors, font, radius, shadow, space } from '../../shared/theme';
 import { formatDate, formatMoney } from '../../core';
 import { useAppUpdate } from '../../shared/updates';
@@ -23,13 +23,16 @@ export function ProfileScreen() {
   const { check, checking, currentVersion } = useAppUpdate();
   const profile = useAsync(() => customer.profile(), []);
   const [busy, setBusy] = useState(false);
+  const [sheet, setSheet] = useState<SheetRequest | null>(null);
 
-  const confirmSignOut = () => {
-    Alert.alert('Sign out?', 'You will need a new one-time code to sign back in.', [
-      { text: 'Stay signed in', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive', onPress: () => void signOut() },
-    ]);
-  };
+  const confirmSignOut = () =>
+    setSheet({
+      title: 'Sign out?',
+      message: 'You will need a new one-time code to sign back in.',
+      confirmLabel: 'Sign out',
+      destructive: true,
+      onConfirm: () => void signOut(),
+    });
 
   const data = profile.data;
   const preferences = data?.preferences;
@@ -40,7 +43,7 @@ export function ProfileScreen() {
       await customer.updatePreferences(patch);
       await profile.reload();
     } catch (err) {
-      Alert.alert('Could not save', err instanceof Error ? err.message : 'Try again.');
+      setSheet({ tone: 'info', title: 'Could not save', message: err instanceof Error ? err.message : 'Try again.' });
     } finally {
       setBusy(false);
     }
@@ -137,25 +140,22 @@ export function ProfileScreen() {
                 label="Ask the salon to delete my data"
                 variant="ghost"
                 onPress={() =>
-                  Alert.alert(
-                    'Delete your data?',
-                    'The salon receives a deletion request. Your visit history needed for accounting may be retained as required by law, and the salon confirms the deletion with you.',
-                    [
-                      { text: 'Never mind', style: 'cancel' },
-                      {
-                        text: 'Send request',
-                        style: 'destructive',
-                        onPress: async () => {
-                          try {
-                            const result = await customer.requestAccountDeletion({ confirm: true, reason: 'Requested from the mobile app' });
-                            Alert.alert('Request sent', result.message);
-                          } catch (err) {
-                            Alert.alert('Could not send', err instanceof Error ? err.message : 'Try again.');
-                          }
-                        },
-                      },
-                    ],
-                  )
+                  setSheet({
+                    title: 'Delete my data?',
+                    message:
+                      'The salon receives a deletion request. Your visit history needed for accounting may be retained as required by law, and the salon confirms the deletion with you.',
+                    cancelLabel: 'Never mind',
+                    confirmLabel: 'Send request',
+                    destructive: true,
+                    onConfirm: async () => {
+                      try {
+                        const result = await customer.requestAccountDeletion({ confirm: true, reason: 'Requested from the mobile app' });
+                        setSheet({ tone: 'info', title: 'Request sent', message: result.message });
+                      } catch (err) {
+                        setSheet({ tone: 'error', title: 'Could not send', message: err instanceof Error ? err.message : 'Try again.' });
+                      }
+                    },
+                  })
                 }
               />
             </Card>
@@ -164,6 +164,7 @@ export function ProfileScreen() {
           <Loading label="Loading your profile…" />
         ) : null}
       </ScrollView>
+      <AppSheet request={sheet} onClose={() => setSheet(null)} />
     </SafeAreaView>
   );
 }

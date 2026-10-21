@@ -1,10 +1,16 @@
 import { Router } from '../lib/router';
 import { z } from 'zod';
 import { one } from '../db';
-import { clientIp, handler, notFound } from '../lib/http';
+import { clientIp, conflict, handler, notFound, unauthorized } from '../lib/http';
 import { assertUnderRateLimit, recordAttempt } from '../auth';
 import { readSettings } from '../services/settings';
-import { createSalonReview, googleReviewUrl, normalizeGooglePlaceId } from '../services/reviews';
+import {
+  createSalonReview,
+  googleReviewUrl,
+  normalizeGooglePlaceId,
+  reviewForAppointment,
+  reviewerFromToken,
+} from '../services/reviews';
 
 /**
  * Public, unauthenticated endpoints used by the hosted review page.
@@ -38,12 +44,25 @@ publicRouter.get(
     const salon = await findSalon(req.params.salonId!);
     const settings = readSettings(salon.settings);
     const placeId = normalizeGooglePlaceId(settings.googlePlaceId);
+    const rawToken = Array.isArray(req.query.t) ? req.query.t[0] : req.query.t;
+    const reviewer = rawToken ? await reviewerFromToken(rawToken, salon.id) : null;
+    const alreadyReviewed = reviewer ? Boolean(await reviewForAppointment(reviewer.appointmentId)) : false;
+
     res.setHeader('cache-control', 'no-store');
     res.json({
       salon: { id: salon.id, name: salon.name, address: salon.address },
       googleConfigured: Boolean(placeId),
       googleReviewUrl: placeId ? googleReviewUrl(placeId) : null,
       ratingPolicy: { googleMin: 4, privateMax: 3 },
+      reviewer: reviewer
+        ? {
+            name: reviewer.name,
+            phoneMasked: reviewer.phoneMasked,
+            visitDate: reviewer.visitDate,
+          }
+        : null,
+      tokenInvalid: Boolean(rawToken && !reviewer),
+      alreadyReviewed,
     });
   }),
 );
@@ -56,13 +75,21 @@ publicRouter.post(
       .object({
         rating: z.number().int().min(1).max(5),
         message: z.string().trim().max(1500).optional(),
-        name: z.string().trim().max(80).optional(),
-        phone: z.string().trim().max(30).optional(),
+        token: z.string().trim().max(2000).optional(),
       })
       .parse(req.body);
 
     const ip = clientIp(req);
     await assertUnderRateLimit(`review:${salon.id}:${ip}`, 'review_submit', 10, 60);
+
+    const identity = body.token ? await reviewerFromToken(body.token, salon.id) : null;
+    if (body.token && !identity) {
+      throw unauthorized('This review link has expired. Open it again from your visit in the SalonPro app.');
+    }
+    if (identity) {
+      const existing = await reviewForAppointment(identity.appointmentId);
+      if (existing) throw conflict('You already reviewed this visit.');
+    }
 
     const settings = readSettings(salon.settings);
     const placeId = normalizeGooglePlaceId(settings.googlePlaceId);
@@ -75,10 +102,12 @@ publicRouter.post(
       salonId: salon.id,
       rating: body.rating,
       message: body.message,
-      customerName: body.name,
-      customerPhone: body.phone,
+      customerId: identity?.customerId ?? null,
+      appointmentId: identity?.appointmentId ?? null,
+      customerName: identity?.name ?? null,
+      customerPhone: identity?.phone ?? null,
       googleRedirected,
-      source: 'hosted_review',
+      source: identity ? 'customer_session' : 'hosted_review',
       userAgent: req.get('user-agent'),
       ip,
     });
@@ -88,9 +117,10 @@ publicRouter.post(
       ok: true,
       review,
       savedLocally: true,
+      verified: Boolean(identity),
       googleReviewUrl: googleRedirected && placeId ? googleReviewUrl(placeId) : null,
       message: googleRedirected
-        ? 'Your review is ready for Google.'
+        ? 'Your review is saved. You can now share it on Google.'
         : 'Thank you — this feedback stays private with the salon.',
     });
   }),

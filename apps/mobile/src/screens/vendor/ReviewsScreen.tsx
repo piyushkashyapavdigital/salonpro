@@ -34,15 +34,18 @@ function ReviewCard({ review }: { review: SalonReview }) {
       <View style={styles.reviewHead}>
         <View style={{ flex: 1 }}>
           <Stars rating={review.rating} />
-          <Text style={styles.who}>
-            {review.customerName || 'Anonymous customer'}
-            {review.customerPhone ? ` · ${review.customerPhone}` : ''}
-          </Text>
+          <View style={styles.whoRow}>
+            <Text style={styles.who}>
+              {review.customerName || 'Anonymous customer'}
+              {review.customerPhone ? ` · ${review.customerPhone}` : ''}
+            </Text>
+            {review.customerId ? <Badge label="Verified visit" bg={colors.brand50} fg={colors.brand700} /> : null}
+          </View>
         </View>
         <Badge
           label={review.googleRedirected ? 'Google hand-off' : review.rating <= 3 ? 'private' : 'saved'}
           bg={review.googleRedirected ? colors.mintSoft : review.rating <= 3 ? colors.amberSoft : colors.ink100}
-          fg={review.googleRedirected ? colors.mint : review.rating <= 3 ? '#B45309' : colors.ink600}
+          fg={review.googleRedirected ? colors.mint : review.rating <= 3 ? colors.amber : colors.ink600}
         />
       </View>
       <Text style={review.message ? styles.message : styles.emptyMessage}>
@@ -86,7 +89,7 @@ export function ReviewsScreen() {
         <Banner
           tone="info"
           title="How this works"
-          message="4–5★ customers can copy their words and open Google. 1–3★ feedback is saved here only — the customer is never sent to Google."
+          message="Only the salon team can see this feedback. 4–5★ customers can choose to share their words on Google; 1–3★ feedback stays private here."
         />
 
         {reviews.loading && !reviews.data ? (
@@ -168,7 +171,8 @@ const styles = StyleSheet.create({
   reviewHead: { flexDirection: 'row', alignItems: 'flex-start', gap: space(2) },
   stars: { fontSize: 20, color: colors.amber, letterSpacing: 1 },
   starsEmpty: { color: colors.ink200 },
-  who: { fontSize: font.size.sm, fontWeight: font.weight.semibold, color: colors.ink800, marginTop: 2 },
+  whoRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: space(1.5), marginTop: 2 },
+  who: { fontSize: font.size.sm, fontWeight: font.weight.semibold, color: colors.ink800 },
   message: { fontSize: font.size.sm, color: colors.ink700, lineHeight: 21, marginTop: space(2) },
   emptyMessage: { fontSize: font.size.sm, color: colors.ink400, fontStyle: 'italic', marginTop: space(2) },
   meta: { fontSize: font.size.xs, color: colors.ink400, marginTop: space(2) },

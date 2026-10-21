@@ -6,14 +6,15 @@
  * about the wallet refund policy in the salon's own words when the visit was
  * wallet-funded.
  */
-import React, { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useRef, useState } from 'react';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { getApiBase } from '../../shared/api';
 import { catalog, customer } from '../../shared/endpoints';
 import { errorMessage, useAsync } from '../../shared/hooks';
-import { Badge, Banner, Button, Card, Chip, Empty, Loading, Row, SectionTitle } from '../../shared/components';
+import { AppSheet, Badge, Banner, Button, Card, Chip, Empty, Loading, Row, SectionTitle, type SheetRequest } from '../../shared/components';
 import { colors, font, radius, shadow, space, statusColors, STATUS_LABEL } from '../../shared/theme';
 import { addDays, formatDate, formatDateLong, formatMoney, formatTime12, isoDate } from '../../core';
 import type { RootStackParamList } from '../../navigation';
@@ -29,10 +30,20 @@ export function VisitDetailScreen() {
   const [mode, setMode] = useState<'view' | 'move'>('view');
   const [date, setDate] = useState(isoDate());
   const [busy, setBusy] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [sheet, setSheet] = useState<SheetRequest | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const days = useMemo(() => Array.from({ length: 14 }, (_, i) => addDays(isoDate(), i)), []);
+  const scrollRef = useRef<React.ElementRef<typeof ScrollView>>(null);
+
+  /** Banners live at the top of the screen, so bring them into view. */
+  const showNotice = (text: string | null, isError = false) => {
+    if (isError) setError(text);
+    else setMessage(text);
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+  };
 
   const availability = useAsync(
     async () => {
@@ -50,32 +61,50 @@ export function VisitDetailScreen() {
 
   const cancel = () => {
     if (!appointment) return;
-    Alert.alert(
-      'Cancel this visit?',
-      appointment.paymentStatus === 'paid'
-        ? 'The salon will handle any refund according to its published policy, and the wallet is credited only after the salon approves the refund.'
-        : 'The slot is released for other customers.',
-      [
-        { text: 'Keep it', style: 'cancel' },
-        {
-          text: 'Cancel visit',
-          style: 'destructive',
-          onPress: async () => {
-            setBusy(true);
-            setError(null);
-            try {
-              await customer.cancel(appointment.id, 'Cancelled from the mobile app');
-              setMessage('Cancelled. You can book again any time.');
-              await visit.reload();
-            } catch (err) {
-              setError(errorMessage(err));
-            } finally {
-              setBusy(false);
-            }
-          },
-        },
-      ],
-    );
+    setSheet({
+      title: 'Cancel this visit?',
+      message:
+        appointment.paymentStatus === 'paid'
+          ? 'The salon will handle any refund according to its published policy, and the wallet is credited only after the salon approves the refund.'
+          : 'The slot is released for other customers.',
+      cancelLabel: 'Keep it',
+      confirmLabel: 'Cancel visit',
+      destructive: true,
+      onConfirm: async () => {
+        setBusy(true);
+        setError(null);
+        try {
+          await customer.cancel(appointment.id, 'Cancelled from the mobile app');
+          showNotice('Cancelled. You can book again any time.');
+          await visit.reload();
+        } catch (err) {
+          showNotice(errorMessage(err), true);
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
+  };
+
+  const openReview = async () => {
+    if (!appointment) return;
+    setReviewBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const link = await customer.reviewLink(appointment.id);
+      if (link.alreadyReviewed) {
+        showNotice('You already reviewed this visit. Thank you for the feedback.');
+        return;
+      }
+      if (!link.path) throw new Error('The review link could not be created.');
+      const url = `${getApiBase().replace(/\/+$/, '')}${link.path}`;
+      await Linking.openURL(url);
+    } catch (err) {
+      showNotice(errorMessage(err), true);
+    } finally {
+      setReviewBusy(false);
+    }
   };
 
   const move = async (startTime: string, staffId: string) => {
@@ -105,7 +134,7 @@ export function VisitDetailScreen() {
         <Text style={styles.title}>Visit</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {visit.error && !appointment ? <Banner tone="error" message={visit.error} action="Try again" onAction={visit.reload} /> : null}
         {error ? <Banner tone="error" title="That did not work" message={error} /> : null}
         {message ? <Banner tone="success" message={message} /> : null}
@@ -204,6 +233,23 @@ export function VisitDetailScreen() {
               </View>
             )}
 
+            {appointment.status === 'completed' ? (
+              <Card>
+                <View style={styles.reviewHead}>
+                  <View style={styles.reviewIcon}>
+                    <MaterialIcons name="star-outline" size={20} color={colors.brand700} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.reviewTitle}>How was your visit?</Text>
+                    <Text style={styles.reviewCopy}>
+                      Your review is linked to this visit. Only the salon team can see it — it is never shown to other customers.
+                    </Text>
+                  </View>
+                </View>
+                <Button label="Review this visit" onPress={openReview} loading={reviewBusy} style={{ marginTop: space(3) }} />
+              </Card>
+            ) : null}
+
             {!canChange ? (
               <Text style={styles.footnote}>
                 A visit can only be moved or cancelled while it is still booked or confirmed. Contact the salon for anything else.
@@ -212,6 +258,7 @@ export function VisitDetailScreen() {
           </>
         ) : null}
       </ScrollView>
+      <AppSheet request={sheet} onClose={() => setSheet(null)} />
     </SafeAreaView>
   );
 }
@@ -235,5 +282,9 @@ const styles = StyleSheet.create({
   slotTime: { fontSize: font.size.sm, fontWeight: font.weight.bold, color: colors.ink800 },
   slotStaff: { fontSize: 9, color: colors.ink400 },
   actions: { flexDirection: 'row', gap: space(2) },
+  reviewHead: { flexDirection: 'row', gap: space(3), alignItems: 'flex-start' },
+  reviewIcon: { width: 38, height: 38, borderRadius: radius.pill, backgroundColor: colors.brand50, alignItems: 'center', justifyContent: 'center' },
+  reviewTitle: { fontSize: font.size.md, fontWeight: font.weight.bold, color: colors.ink900 },
+  reviewCopy: { fontSize: font.size.sm, color: colors.ink500, lineHeight: 20, marginTop: 3 },
   footnote: { fontSize: font.size.xs, color: colors.ink400, lineHeight: 18 },
 });

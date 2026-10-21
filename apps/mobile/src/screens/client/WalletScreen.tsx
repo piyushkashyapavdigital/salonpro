@@ -6,7 +6,7 @@
  * simulated signature passes the very same verification).
  */
 import React, { useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from '../../shared/components';
@@ -14,7 +14,7 @@ import { customer, payments } from '../../shared/endpoints';
 import { startCheckout } from '../../shared/checkout';
 import { errorMessage, useAsync } from '../../shared/hooks';
 import { useAuth } from '../../shared/auth';
-import { Badge, Banner, Button, Card, Empty, Field, Loading, SectionTitle, StatTile } from '../../shared/components';
+import { AppSheet, Badge, Banner, Button, Card, Empty, Field, Loading, SectionTitle, StatTile, type SheetRequest } from '../../shared/components';
 import { colors, font, gradients, radius, shadow, space } from '../../shared/theme';
 import { formatDateTime, formatMoney, formatMoneyShort, rupeesToPaise } from '../../core';
 
@@ -24,6 +24,7 @@ export function WalletScreen() {
   const [busyOffer, setBusyOffer] = useState<string | null>(null);
   const [customAmount, setCustomAmount] = useState('');
   const [message, setMessage] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [sheet, setSheet] = useState<SheetRequest | null>(null);
 
   /**
    * Top up the wallet.
@@ -75,11 +76,13 @@ export function WalletScreen() {
 
   const explain = () => {
     const data = wallet.data;
-    Alert.alert(
-      'How your wallet works',
-      data?.terms?.join('\n\n') ??
+    setSheet({
+      tone: 'info',
+      title: 'How your wallet works',
+      message:
+        data?.terms?.join('\n\n') ??
         'Bonus value is spent before purchased value unless the salon has configured otherwise. Purchased value never expires.',
-    );
+    });
   };
 
   if (wallet.loading && !wallet.data) return <Loading label="Opening your wallet…" />;
@@ -229,7 +232,7 @@ export function WalletScreen() {
                       <Badge
                         label={transaction.status}
                         bg={transaction.status === 'pending' ? colors.amberSoft : colors.ink100}
-                        fg={transaction.status === 'pending' ? '#B45309' : colors.ink600}
+                        fg={transaction.status === 'pending' ? colors.amber : colors.ink600}
                       />
                     ) : null}
                   </View>
@@ -244,6 +247,7 @@ export function WalletScreen() {
           </Text>
         </View>
       </ScrollView>
+      <AppSheet request={sheet} onClose={() => setSheet(null)} />
     </SafeAreaView>
   );
 }
@@ -252,10 +256,10 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.canvas },
   body: { paddingBottom: space(12) },
   hero: { paddingHorizontal: space(5), paddingTop: space(5), paddingBottom: space(7), borderBottomLeftRadius: 30, borderBottomRightRadius: 30 },
-  heroLabel: { color: '#EADCF6', fontSize: font.size.xs, textTransform: 'uppercase', letterSpacing: 0.8 },
+  heroLabel: { color: colors.brand100, fontSize: font.size.xs, textTransform: 'uppercase', letterSpacing: 0.8 },
   heroValue: { color: colors.white, fontSize: font.size.hero, fontWeight: font.weight.heavy, letterSpacing: -1, marginTop: space(1) },
   heroSplit: { flexDirection: 'row', gap: space(8), marginTop: space(4), alignItems: 'flex-end' },
-  splitLabel: { color: '#D8C7EC', fontSize: font.size.xs },
+  splitLabel: { color: colors.brand200, fontSize: font.size.xs },
   splitValue: { color: colors.white, fontSize: font.size.md, fontWeight: font.weight.bold, marginTop: 2 },
   infoButton: { marginLeft: 'auto', width: 32, height: 32, borderRadius: radius.pill, backgroundColor: '#ffffff26', alignItems: 'center', justifyContent: 'center' },
   stack: { padding: space(4), gap: space(3) },

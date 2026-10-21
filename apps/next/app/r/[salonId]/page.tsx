@@ -4,16 +4,26 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import styles from './review.module.css';
 
+interface ReviewerInfo {
+  name: string;
+  phoneMasked: string;
+  visitDate: string;
+}
+
 interface ReviewInfo {
   salon: { id: string; name: string; address: string };
   googleConfigured: boolean;
   googleReviewUrl: string | null;
   ratingPolicy: { googleMin: number; privateMax: number };
+  reviewer: ReviewerInfo | null;
+  tokenInvalid: boolean;
+  alreadyReviewed: boolean;
 }
 
 interface SubmitResult {
   ok: true;
   review: { id: string; rating: number; googleRedirected: boolean };
+  verified?: boolean;
   googleReviewUrl: string | null;
   message: string;
 }
@@ -25,6 +35,7 @@ interface DoneState {
   copied: boolean;
   /** False when the browser blocked the new tab; the success card shows a link. */
   opened: boolean;
+  verified: boolean;
 }
 
 function errorFrom(data: unknown, fallback: string) {
@@ -32,6 +43,17 @@ function errorFrom(data: unknown, fallback: string) {
     return (data as { message: string }).message;
   }
   return fallback;
+}
+
+function firstName(name: string) {
+  return name.trim().split(/\s+/)[0] || 'there';
+}
+
+function formatVisitDate(value: string | null | undefined) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 /** Copy synchronously inside the click, so mobile browsers keep the gesture. */
@@ -95,12 +117,11 @@ export default function ReviewPage() {
   const salonId = typeof params?.salonId === 'string' ? params.salonId : '';
 
   const [info, setInfo] = useState<ReviewInfo | null>(null);
+  const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [rating, setRating] = useState(0);
   const [message, setMessage] = useState('');
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [done, setDone] = useState<DoneState | null>(null);
@@ -111,11 +132,16 @@ export default function ReviewPage() {
       setLoadError('This review link is missing a salon.');
       return;
     }
+
+    const queryToken = new URLSearchParams(window.location.search).get('t') ?? '';
+    setToken(queryToken);
+
     let cancelled = false;
     const controller = new AbortController();
     (async () => {
       try {
-        const res = await fetch(`/api/public/reviews/${encodeURIComponent(salonId)}`, {
+        const suffix = queryToken ? `?t=${encodeURIComponent(queryToken)}` : '';
+        const res = await fetch(`/api/public/reviews/${encodeURIComponent(salonId)}${suffix}`, {
           cache: 'no-store',
           signal: controller.signal,
         });
@@ -140,6 +166,7 @@ export default function ReviewPage() {
 
   const isPositive = rating >= 4;
   const canGoogle = Boolean(info?.googleConfigured && info.googleReviewUrl);
+  const effectiveToken = info?.tokenInvalid ? '' : token;
   const monogram = useMemo(() => {
     const words = (info?.salon.name ?? 'Salon')
       .replace(/([a-z])([A-Z])/g, '$1 $2')
@@ -150,6 +177,7 @@ export default function ReviewPage() {
   }, [info?.salon.name]);
 
   function selectRating(value: number) {
+    if (info?.alreadyReviewed) return;
     setRating(value);
     setDone(null);
     setSubmitError(null);
@@ -162,8 +190,7 @@ export default function ReviewPage() {
       body: JSON.stringify({
         rating,
         message: message.trim() || undefined,
-        name: name.trim() || undefined,
-        phone: phone.trim() || undefined,
+        token: effectiveToken || undefined,
       }),
     });
     const data = await res.json().catch(() => null);
@@ -182,6 +209,7 @@ export default function ReviewPage() {
         message: data.message,
         copied: false,
         opened: false,
+        verified: Boolean(data.verified),
       });
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Your feedback could not be saved.');
@@ -205,6 +233,7 @@ export default function ReviewPage() {
           : 'Google’s review form is open. Write your review there.',
         copied,
         opened,
+        verified: Boolean(info.reviewer),
       });
       try {
         await submit();
@@ -242,47 +271,55 @@ export default function ReviewPage() {
 
   if (done) {
     const positive = done.rating >= 4;
+    const greeting = info.reviewer ? `Thank you, ${firstName(info.reviewer.name)}.` : 'Thank you!';
     return (
       <main className={styles.page}>
         <div className={styles.card}>
           <div className={styles.brandMark}>{monogram}</div>
           <p className={styles.eyebrow}>{info.salon.name}</p>
           <div className={styles.successIcon} aria-hidden="true">✓</div>
-          <h1 className={styles.title}>{positive ? 'Thank you!' : 'Thank you for being honest.'}</h1>
+          <h1 className={styles.title}>{positive ? greeting : 'Thank you for being honest.'}</h1>
           <Stars rating={done.rating} />
           <p className={styles.lede}>
             {positive
               ? done.googleUrl
                 ? !done.opened
                   ? done.copied
-                    ? 'Your review is copied. The browser blocked the new tab — tap the button below to open Google and paste it.'
-                    : 'Your rating is ready. Tap the button below to open Google’s review form.'
+                    ? 'Your review is saved to your visit. The browser blocked the new tab — tap the button below to open Google and paste it.'
+                    : 'Your rating is saved. Tap the button below to open Google’s review form.'
                   : done.copied
-                    ? 'Your review is copied. Paste it into the Google review box and post it when you are ready.'
-                    : 'Google’s review form is open in another tab. Write your review there when you are ready.'
-                : 'Your rating is saved for the salon. Google reviews are not connected yet, so nothing was sent to Google.'
-              : 'Your feedback is private. The salon can see it in SalonPro, but it was not sent to Google.'}
+                    ? 'Your review is saved to your visit. Your words are copied — paste them into Google and post when you are ready.'
+                    : 'Your review is saved to your visit. Google’s review form is open in another tab.'
+                : 'Your rating is saved to your visit. Google reviews are not connected yet, so nothing was sent to Google.'
+              : 'Your feedback is saved to your visit and is visible only to the salon team. It was not sent to Google.'}
           </p>
+          {done.verified ? <p className={styles.verifiedNote}>Linked to your completed visit</p> : null}
           {done.googleUrl ? (
             <a className={styles.primaryButton} href={done.googleUrl} target="_blank" rel="noreferrer">
               {done.copied ? 'Open Google review again' : 'Open Google review'}
             </a>
           ) : null}
-          <button
-            type="button"
-            className={styles.secondaryButton}
-            onClick={() => {
-              setDone(null);
-              setRating(0);
-              setMessage('');
-              setSubmitError(null);
-            }}
-          >
-            Rate another visit
-          </button>
+          <p className={styles.smallNote}>You can close this page now.</p>
           {submitError ? <p className={styles.error}>{submitError}</p> : null}
         </div>
-        <p className={styles.footer}>Powered by SalonPro · Your details are never posted automatically</p>
+        <p className={styles.footer}>Powered by SalonPro · Private feedback for the salon</p>
+      </main>
+    );
+  }
+
+  if (info.alreadyReviewed) {
+    return (
+      <main className={styles.page}>
+        <div className={styles.card}>
+          <div className={styles.brandMark}>{monogram}</div>
+          <p className={styles.eyebrow}>{info.salon.name}</p>
+          <div className={styles.successIcon} aria-hidden="true">✓</div>
+          <h1 className={styles.title}>You already reviewed this visit.</h1>
+          <p className={styles.lede}>
+            Thank you for the feedback. Open your next completed visit in the SalonPro app to review it.
+          </p>
+        </div>
+        <p className={styles.footer}>Powered by SalonPro</p>
       </main>
     );
   }
@@ -296,6 +333,25 @@ export default function ReviewPage() {
         <p className={styles.lede}>
           {info.salon.address ? `${info.salon.address} · ` : ''}Your feedback helps the salon do better.
         </p>
+
+        {info.reviewer ? (
+          <div className={styles.reviewerChip}>
+            <span className={styles.reviewerCheck} aria-hidden="true">✓</span>
+            <span>
+              Reviewing as <strong>{info.reviewer.name}</strong>
+              {info.reviewer.visitDate ? ` · ${formatVisitDate(info.reviewer.visitDate)}` : ''}
+            </span>
+          </div>
+        ) : info.tokenInvalid ? (
+          <div className={styles.infoBox}>
+            This visit link has expired, so your review will be saved without your profile. Open the review link from your
+            visit in the SalonPro app to attach it.
+          </div>
+        ) : (
+          <div className={styles.infoBox}>
+            Open the review link from your completed visit in the SalonPro app to attach this feedback to your profile.
+          </div>
+        )}
 
         <div className={styles.starPicker} role="radiogroup" aria-label="Your rating">
           {[1, 2, 3, 4, 5].map((value) => (
@@ -322,7 +378,7 @@ export default function ReviewPage() {
                 </>
               ) : (
                 <>
-                  <strong>We are listening.</strong> This stays private with the salon and will not be posted to Google.
+                  <strong>We are listening.</strong> This stays private with the salon team and will not be posted to Google.
                 </>
               )}
             </div>
@@ -345,52 +401,22 @@ export default function ReviewPage() {
               }
             />
 
-            <div className={styles.fieldRow}>
-              <div>
-                <label className={styles.label} htmlFor="review-name">
-                  Your name<span className={styles.optional}>optional</span>
-                </label>
-                <input
-                  id="review-name"
-                  className={styles.input}
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  maxLength={80}
-                  autoComplete="name"
-                  placeholder="Asha"
-                />
-              </div>
-              <div>
-                <label className={styles.label} htmlFor="review-phone">
-                  Phone<span className={styles.optional}>optional</span>
-                </label>
-                <input
-                  id="review-phone"
-                  className={styles.input}
-                  value={phone}
-                  onChange={(event) => setPhone(event.target.value)}
-                  maxLength={30}
-                  inputMode="tel"
-                  autoComplete="tel"
-                  placeholder="For a follow-up"
-                />
-              </div>
-            </div>
-
             {isPositive ? (
               canGoogle ? (
                 <>
                   <button type="button" className={styles.primaryButton} onClick={openGoogleAndSave} disabled={submitting}>
-                    {message.trim() ? 'Copy review & open Google' : 'Open Google review'}
+                    {message.trim() ? 'Save & open Google' : 'Open Google review'}
                   </button>
                   <p className={styles.smallNote}>
-                    Google does not let apps prefill review text. We copy your words so you can paste them into Google in one tap.
+                    Google does not let apps prefill review text. Your words are copied so you can paste them into Google in
+                    one tap. The rating is also saved to your visit here.
                   </p>
                 </>
               ) : (
                 <>
                   <div className={styles.infoBox}>
-                    Google reviews are not connected for this salon yet. Your rating will be saved privately for the salon.
+                    Google reviews are not connected for this salon yet. Your rating will be saved privately for the salon
+                    team.
                   </div>
                   <button type="button" className={styles.primaryButton} onClick={() => void sendPrivateFeedback()} disabled={submitting}>
                     {submitting ? 'Saving…' : 'Send feedback'}
@@ -407,14 +433,14 @@ export default function ReviewPage() {
             <p className={styles.smallNote}>
               {isPositive
                 ? 'Only 4–5★ visits are offered the Google hand-off. 1–3★ feedback stays private.'
-                : 'Nothing is posted automatically. The salon sees this in its private Reviews screen.'}
+                : 'Nothing is posted automatically. Only the salon team sees this in its private Reviews screen.'}
             </p>
           </>
         ) : (
           <p className={styles.pickHint}>Tap a star to begin.</p>
         )}
       </div>
-      <p className={styles.footer}>Powered by SalonPro</p>
+      <p className={styles.footer}>Powered by SalonPro · Private feedback for the salon</p>
     </main>
   );
 }

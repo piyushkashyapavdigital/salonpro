@@ -79,7 +79,7 @@ export function HomeScreen() {
 
           {homeData?.loyaltyEnabled ? (
             <View style={styles.loyaltyRow}>
-              <MaterialIcons name="stars" size={16} color="#FDE68A" />
+              <MaterialIcons name="stars" size={16} color={colors.lemon} />
               <Text style={styles.loyaltyText}>
                 {homeData.loyalty.points} loyalty points
                 {homeData.loyalty.lifetimePoints ? ` · ${homeData.loyalty.lifetimePoints} earned so far` : ''}
@@ -262,16 +262,16 @@ const styles = StyleSheet.create({
   hero: { paddingHorizontal: space(5), paddingTop: space(3), paddingBottom: space(6), borderBottomLeftRadius: 30, borderBottomRightRadius: 30 },
   heroTop: { flexDirection: 'row', alignItems: 'center', gap: space(3) },
   hello: { color: colors.white, fontSize: font.size.xl, fontWeight: font.weight.heavy, letterSpacing: -0.4 },
-  heroSub: { color: '#EADCF6', fontSize: font.size.sm, marginTop: 2 },
+  heroSub: { color: colors.brand100, fontSize: font.size.sm, marginTop: 2 },
   bell: { width: 40, height: 40, borderRadius: radius.pill, backgroundColor: '#ffffff26', alignItems: 'center', justifyContent: 'center' },
   walletCard: { marginTop: space(5), backgroundColor: '#ffffff1f', borderRadius: radius.lg, padding: space(4), flexDirection: 'row', alignItems: 'center', gap: space(3) },
-  walletLabel: { color: '#EADCF6', fontSize: font.size.xs, textTransform: 'uppercase', letterSpacing: 0.6 },
+  walletLabel: { color: colors.brand100, fontSize: font.size.xs, textTransform: 'uppercase', letterSpacing: 0.6 },
   walletValue: { color: colors.white, fontSize: font.size.xxl, fontWeight: font.weight.heavy, marginTop: 2, letterSpacing: -0.6 },
-  walletSplit: { color: '#D8C7EC', fontSize: font.size.xs, marginTop: 2 },
+  walletSplit: { color: colors.brand200, fontSize: font.size.xs, marginTop: 2 },
   recharge: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: space(1), backgroundColor: colors.white, borderRadius: radius.pill, paddingHorizontal: space(3), paddingVertical: space(2) },
   rechargeText: { color: colors.brand700, fontWeight: font.weight.bold, fontSize: font.size.xs },
   loyaltyRow: { flexDirection: 'row', alignItems: 'center', gap: space(2), marginTop: space(3) },
-  loyaltyText: { color: '#FDE68A', fontSize: font.size.xs, fontWeight: font.weight.semibold },
+  loyaltyText: { color: colors.lemon, fontSize: font.size.xs, fontWeight: font.weight.semibold },
   body: { padding: space(4), gap: space(3) },
   visitHead: { flexDirection: 'row', alignItems: 'center', gap: space(3) },
   visitDate: { fontSize: font.size.md, fontWeight: font.weight.bold, color: colors.ink900 },

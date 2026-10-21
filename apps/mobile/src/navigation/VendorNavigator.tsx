@@ -17,7 +17,7 @@ import { ReviewsScreen } from '../screens/vendor/ReviewsScreen';
 import { SettingsScreen } from '../screens/vendor/SettingsScreen';
 import { WalkInScreen } from '../screens/vendor/WalkInScreen';
 import { ServerSettingsScreen } from '../screens/ServerSettingsScreen';
-import { TabIcon, tabBarStyle, tabLabelStyle } from './common';
+import { GlobalTabItem, WorkspaceShell, useWorkspaceTab } from './GlobalTabBar';
 import { allows, type VendorStackParamList, type VendorTabParamList } from './types';
 
 const Stack = createNativeStackNavigator<VendorStackParamList>();
@@ -31,7 +31,22 @@ const TAB_ICONS: Record<keyof VendorTabParamList, string> = {
   More: 'apps',
 };
 
-function MainTabs() {
+/** Detail screens keep a sensible tab highlighted while the global bar stays visible. */
+const DETAIL_TABS: Record<string, keyof VendorTabParamList> = {
+  AppointmentDetail: 'Schedule',
+  WalkIn: 'Schedule',
+  CustomerDetail: 'Customers',
+  Analytics: 'More',
+  Staff: 'More',
+  Services: 'More',
+  Reminders: 'More',
+  Offers: 'More',
+  Reviews: 'More',
+  Settings: 'More',
+  ServerSettings: 'More',
+};
+
+function useVendorTabs() {
   const { user } = useAuth();
   const permissions = user?.permissions;
 
@@ -39,24 +54,35 @@ function MainTabs() {
   const showSchedule = allows(permissions, 'salon.appointment.read');
   const showCustomers = allows(permissions, 'salon.customer.read');
   const showMoney = allows(permissions, 'salon.payment.read') || allows(permissions, 'salon.payment.refund');
-  const initialRouteName: keyof VendorTabParamList = showToday
-    ? 'Today'
-    : showSchedule
-      ? 'Schedule'
-      : showCustomers
-        ? 'Customers'
-        : 'More';
+
+  const items: GlobalTabItem[] = [
+    ...(showToday ? [{ name: 'Today', label: 'Today', icon: TAB_ICONS.Today }] : []),
+    ...(showSchedule ? [{ name: 'Schedule', label: 'Schedule', icon: TAB_ICONS.Schedule }] : []),
+    ...(showCustomers ? [{ name: 'Customers', label: 'Customers', icon: TAB_ICONS.Customers }] : []),
+    ...(showMoney ? [{ name: 'Money', label: 'Money', icon: TAB_ICONS.Money }] : []),
+    { name: 'More', label: 'More', icon: TAB_ICONS.More },
+  ];
+
+  const initialRouteName = (items[0]?.name ?? 'More') as keyof VendorTabParamList;
+
+  return { showToday, showSchedule, showCustomers, showMoney, items, initialRouteName };
+}
+
+function MainTabs() {
+  const { showToday, showSchedule, showCustomers, showMoney, initialRouteName } = useVendorTabs();
+  const { setActive } = useWorkspaceTab();
 
   return (
     <Tabs.Navigator
       initialRouteName={initialRouteName}
-      screenOptions={({ route }) => ({
+      tabBar={() => null}
+      screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.brand700,
-        tabBarInactiveTintColor: colors.ink400,
-        tabBarLabelStyle: tabLabelStyle,
-        tabBarStyle,
-        tabBarIcon: ({ focused }) => <TabIcon name={TAB_ICONS[route.name]} focused={focused} />,
+        sceneStyle: { backgroundColor: colors.canvas },
+      }}
+      screenListeners={({ route }) => ({
+        focus: () => setActive(route.name),
+        tabPress: () => setActive(route.name),
       })}
     >
       {showToday ? <Tabs.Screen name="Today" component={OverviewScreen} /> : null}
@@ -69,6 +95,8 @@ function MainTabs() {
 }
 
 export function VendorNavigator() {
+  const { items, initialRouteName } = useVendorTabs();
+
   return (
     <Stack.Navigator
       screenOptions={{
@@ -76,6 +104,17 @@ export function VendorNavigator() {
         contentStyle: { backgroundColor: colors.canvas },
         animation: 'slide_from_right',
       }}
+      layout={({ children, state, navigation }) => (
+        <WorkspaceShell
+          state={state}
+          navigation={navigation}
+          items={items}
+          detailTabs={DETAIL_TABS}
+          initialTab={initialRouteName}
+        >
+          {children}
+        </WorkspaceShell>
+      )}
     >
       <Stack.Screen name="Main" component={MainTabs} options={{ animation: 'fade' }} />
       <Stack.Screen name="AppointmentDetail" component={AppointmentDetailScreen} />

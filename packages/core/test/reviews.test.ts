@@ -129,6 +129,75 @@ describe('salon reviews', () => {
     assert.equal(anonymous.status, 401);
   });
 
+  test('a signed-in customer reviews through their own session — no name or phone form', async () => {
+    const customerToken = await h.login(ACCOUNTS.customer1);
+    const profile = await h.get('/customer/profile', customerToken);
+    assert.equal(profile.status, 200);
+
+    const link = await h.post('/customer/reviews/link', {}, customerToken);
+    assert.equal(link.status, 200);
+    assert.equal(link.data.alreadyReviewed, false);
+    assert.ok(link.data.token, 'a signed review token is issued');
+    assert.ok(link.data.path.startsWith(`/r/${salonId}`), 'the link points at the hosted page');
+
+    const page = await h.get(`/public/reviews/${salonId}?t=${encodeURIComponent(link.data.token)}`);
+    assert.equal(page.status, 200);
+    assert.equal(page.data.tokenInvalid, false);
+    assert.equal(page.data.reviewer.name, profile.data.user.name);
+    assert.equal(page.data.reviewer.phoneMasked.includes(profile.data.user.phone), false, 'the raw phone never leaves the server');
+
+    /* A customer can ask for the link of one specific visit, but only of
+     * their own completed visit. */
+    const visit = await h.db.one<{ appointmentId: string }>(
+      'SELECT appointmentId FROM service_records WHERE customerId = ? ORDER BY completedAt DESC LIMIT 1',
+      profile.data.user.id,
+    );
+    const specific = await h.post('/customer/reviews/link', { appointmentId: visit!.appointmentId }, customerToken);
+    assert.equal(specific.status, 200);
+    assert.equal(specific.data.appointmentId, visit!.appointmentId);
+
+    const foreign = await h.post('/customer/reviews/link', { appointmentId: 'someone-elses-visit' }, customerToken);
+    assert.equal(foreign.status, 404);
+
+    const submitted = await h.post(`/public/reviews/${salonId}`, {
+      rating: 5,
+      message: 'Loved the service',
+      token: link.data.token,
+    });
+    assert.equal(submitted.status, 201);
+    assert.equal(submitted.data.verified, true);
+    assert.equal(submitted.data.review.customerId, profile.data.user.id);
+    assert.equal(submitted.data.review.customerName, profile.data.user.name);
+    assert.equal(submitted.data.review.appointmentId, link.data.appointmentId);
+
+    const list = await h.get('/admin/reviews', ownerToken);
+    assert.equal(list.status, 200);
+    assert.equal(list.data.reviews[0].customerId, profile.data.user.id);
+
+    /* A second review for the same visit is refused, so one tap cannot spam. */
+    const again = await h.post(`/public/reviews/${salonId}`, { rating: 1, token: link.data.token });
+    assert.equal(again.status, 409);
+  });
+
+  test('a review link that is not signed by the server is refused', async () => {
+    const customerToken = await h.login(ACCOUNTS.customer1);
+    const link = await h.post('/customer/reviews/link', {}, customerToken);
+    const tampered = `${String(link.data.token).slice(0, -4)}0000`;
+
+    const page = await h.get(`/public/reviews/${salonId}?t=${encodeURIComponent(tampered)}`);
+    assert.equal(page.status, 200);
+    assert.equal(page.data.reviewer, null);
+    assert.equal(page.data.tokenInvalid, true);
+
+    const submitted = await h.post(`/public/reviews/${salonId}`, { rating: 4, token: tampered });
+    assert.equal(submitted.status, 401);
+  });
+
+  test('only a customer account can mint a review link', async () => {
+    const owner = await h.post('/customer/reviews/link', {}, ownerToken);
+    assert.equal(owner.status, 403);
+  });
+
   test('an unknown or suspended salon has no public review page', async () => {
     const missing = await h.get('/public/reviews/does-not-exist');
     assert.equal(missing.status, 404);

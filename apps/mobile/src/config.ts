@@ -15,7 +15,7 @@ export const SERVER_PRESETS: string[] = [
   'http://10.0.2.2:4000',
 ];
 
-export const APP_VERSION = '2.0.2';
+export const APP_VERSION = '2.1.0';
 export const APP_NAME = 'SalonPro';
 
 /**

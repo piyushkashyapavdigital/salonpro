@@ -13,31 +13,42 @@ import { ReferralScreen } from '../screens/client/ReferralScreen';
 import { NotificationsScreen } from '../screens/client/NotificationsScreen';
 import { ProfileEditScreen } from '../screens/client/ProfileEditScreen';
 import { ServerSettingsScreen } from '../screens/ServerSettingsScreen';
-import { TabIcon, tabBarStyle, tabLabelStyle } from './common';
+import { GlobalTabItem, WorkspaceShell, useWorkspaceTab } from './GlobalTabBar';
 import type { ClientStackParamList, ClientTabParamList } from './types';
 
 const Stack = createNativeStackNavigator<ClientStackParamList>();
 const Tabs = createBottomTabNavigator<ClientTabParamList>();
 
-const TAB_ICONS: Record<keyof ClientTabParamList, string> = {
-  Home: 'spa',
-  Book: 'event-available',
-  Visits: 'history',
-  Wallet: 'account-balance-wallet',
-  Profile: 'person',
+const ITEMS: GlobalTabItem[] = [
+  { name: 'Home', label: 'Home', icon: 'spa' },
+  { name: 'Book', label: 'Book', icon: 'event-available' },
+  { name: 'Visits', label: 'Visits', icon: 'history' },
+  { name: 'Wallet', label: 'Wallet', icon: 'account-balance-wallet' },
+  { name: 'Profile', label: 'Profile', icon: 'person' },
+];
+
+const DETAIL_TABS: Record<string, keyof ClientTabParamList> = {
+  VisitDetail: 'Visits',
+  Offers: 'Home',
+  Referral: 'Home',
+  Notifications: 'Home',
+  ProfileEdit: 'Profile',
+  ServerSettings: 'Profile',
 };
 
 function MainTabs() {
+  const { setActive } = useWorkspaceTab();
+
   return (
     <Tabs.Navigator
-      screenOptions={({ route }) => ({
+      tabBar={() => null}
+      screenOptions={{
         headerShown: false,
-        tabBarShowLabel: true,
-        tabBarActiveTintColor: colors.brand700,
-        tabBarInactiveTintColor: colors.ink400,
-        tabBarLabelStyle: tabLabelStyle,
-        tabBarStyle,
-        tabBarIcon: ({ focused }) => <TabIcon name={TAB_ICONS[route.name]} focused={focused} />,
+        sceneStyle: { backgroundColor: colors.canvas },
+      }}
+      screenListeners={({ route }) => ({
+        focus: () => setActive(route.name),
+        tabPress: () => setActive(route.name),
       })}
     >
       <Tabs.Screen name="Home" component={HomeScreen} />
@@ -57,6 +68,17 @@ export function ClientNavigator() {
         contentStyle: { backgroundColor: colors.canvas },
         animation: 'slide_from_right',
       }}
+      layout={({ children, state, navigation }) => (
+        <WorkspaceShell
+          state={state}
+          navigation={navigation}
+          items={ITEMS}
+          detailTabs={DETAIL_TABS}
+          initialTab="Home"
+        >
+          {children}
+        </WorkspaceShell>
+      )}
     >
       <Stack.Screen name="Main" component={MainTabs} options={{ animation: 'fade' }} />
       <Stack.Screen name="VisitDetail" component={VisitDetailScreen} />

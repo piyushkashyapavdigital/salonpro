@@ -14,7 +14,7 @@ export type ClientTabParamList = {
 };
 
 export type ClientStackParamList = {
-  Main: undefined;
+  Main: { screen?: keyof ClientTabParamList } | undefined;
   VisitDetail: { id: string };
   Offers: undefined;
   Referral: undefined;
@@ -44,7 +44,7 @@ export type VendorTabParamList = {
 };
 
 export type VendorStackParamList = {
-  Main: undefined;
+  Main: { screen?: keyof VendorTabParamList } | undefined;
   AppointmentDetail: { id: string };
   CustomerDetail: { id: string };
   WalkIn: { customerId?: string; customerName?: string; customerPhone?: string } | undefined;
@@ -71,7 +71,7 @@ export type PlatformTabParamList = {
 };
 
 export type PlatformStackParamList = {
-  Main: undefined;
+  Main: { screen?: keyof PlatformTabParamList } | undefined;
   SalonDetail: { id: string };
   CreateSalon: undefined;
   ServerSettings: undefined;

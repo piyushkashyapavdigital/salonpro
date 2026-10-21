@@ -140,7 +140,7 @@ function formatDateTimeShort(iso: string): string {
 const styles = StyleSheet.create({
   heroStats: { flexDirection: 'row', gap: space(4), marginTop: space(5) },
   heroStat: { flex: 1 },
-  heroLabel: { color: '#EADCF6', fontSize: font.size.xs, textTransform: 'uppercase', letterSpacing: 0.6 },
+  heroLabel: { color: colors.brand100, fontSize: font.size.xs, textTransform: 'uppercase', letterSpacing: 0.6 },
   heroValue: { color: colors.white, fontSize: font.size.xxl, fontWeight: font.weight.heavy, marginTop: 2 },
   body: { padding: space(4), gap: space(3) },
   grid: { flexDirection: 'row', gap: space(3) },

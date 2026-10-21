@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
   slotTime: { fontSize: font.size.sm, fontWeight: font.weight.bold, color: colors.ink800 },
   slotTimeActive: { color: colors.white },
   slotStaff: { fontSize: 9, color: colors.ink400, paddingHorizontal: 2 },
-  slotStaffActive: { color: '#EADCF6' },
+  slotStaffActive: { color: colors.brand100 },
   payRow: { flexDirection: 'row', alignItems: 'center', gap: space(3), paddingVertical: space(2) },
   payRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.ink100, marginTop: space(1), paddingTop: space(3) },
   payTitle: { fontSize: font.size.md, fontWeight: font.weight.semibold, color: colors.ink900 },

@@ -84,6 +84,30 @@ test('dev PIN sign-in opens the app as the salon owner and says no OTP was used'
   assert.match(res.data.notice, /no otp was used/i);
 });
 
+test('dev PIN sign-in can open a seeded account for a chosen workspace', async () => {
+  const customer = await h.post<{ token: string; user: { role: string } }>('/auth/dev-login', {
+    pin: '1234',
+    role: 'customer',
+  });
+  assert.equal(customer.status, 200);
+  assert.ok(customer.data.token);
+  assert.equal(customer.data.user.role, 'customer');
+
+  const platform = await h.post<{ user: { role: string } }>('/auth/dev-login', {
+    pin: '1234',
+    role: 'super_admin',
+  });
+  assert.equal(platform.status, 200);
+  assert.equal(platform.data.user.role, 'super_admin');
+
+  const owner = await h.post<{ user: { role: string } }>('/auth/dev-login', {
+    pin: '1234',
+    role: 'salon_owner',
+  });
+  assert.equal(owner.status, 200);
+  assert.equal(owner.data.user.role, 'salon_owner');
+});
+
 test('dev PIN sign-in rejects the wrong PIN', async () => {
   const res = await h.post('/auth/dev-login', { pin: '9999' });
   assert.equal(res.status, 401);

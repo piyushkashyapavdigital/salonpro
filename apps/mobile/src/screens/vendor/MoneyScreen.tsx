@@ -182,7 +182,7 @@ export function MoneyScreen() {
                         <Badge
                           label={refund.status}
                           bg={refund.status === 'processed' ? colors.mintSoft : colors.amberSoft}
-                          fg={refund.status === 'processed' ? colors.mint : '#B45309'}
+                          fg={refund.status === 'processed' ? colors.mint : colors.amber}
                         />
                       </View>
                     </View>

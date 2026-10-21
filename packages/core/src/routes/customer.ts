@@ -19,6 +19,7 @@ import { dashboard as referralDashboard, ensureReferralCode, createAttributionTo
 import { preferences, savePreferences, attemptSendAsync } from '../services/notifications';
 import { readSettings } from '../services/settings';
 import { customerProfile } from '../services/analytics';
+import { createReviewToken, reviewForAppointment } from '../services/reviews';
 
 export const customerRouter = new Router();
 
@@ -216,6 +217,75 @@ customerRouter.post(
     );
     await audit(req.auth!.id, 'appointment.reschedule', 'appointment', appt.id, { date: body.date, startTime: body.startTime }, req.ip);
     res.json({ appointment: await getAppointment(appt.id) });
+  }),
+);
+
+/* ------------------------------------------------------------------ */
+/* Reviews — identity comes from the signed-in visit, never a form      */
+/* ------------------------------------------------------------------ */
+
+customerRouter.post(
+  '/reviews/link',
+  requireAuth,
+  handler(async (req, res) => {
+    if (req.auth!.role !== 'customer') {
+      throw forbidden('Only a customer account can review a completed visit.');
+    }
+    const salonId = await scopedSalonId(req.auth!);
+    const cid = customerId(req);
+    const body = z.object({ appointmentId: z.string().optional() }).parse(req.body ?? {});
+
+    /* A customer may review one specific visit (the one they are looking at)
+     * or, with no id, the most recent completed visit. Either way the visit
+     * must be their own completed visit at this salon. */
+    const latest = body.appointmentId
+      ? ((await one<{ appointmentId: string; completedAt: string }>(
+          `SELECT appointmentId, completedAt
+             FROM service_records
+            WHERE appointmentId = ? AND customerId = ? AND salonId = ?`,
+          body.appointmentId,
+          cid,
+          salonId,
+        )) ?? null)
+      : ((await one<{ appointmentId: string; completedAt: string }>(
+          `SELECT appointmentId, completedAt
+             FROM service_records
+            WHERE customerId = ? AND salonId = ?
+            ORDER BY completedAt DESC
+            LIMIT 1`,
+          cid,
+          salonId,
+        )) ?? null);
+    if (!latest) throw notFound('No completed visit is available to review yet.');
+
+    const existing = await reviewForAppointment(latest.appointmentId);
+    if (existing) {
+      res.json({
+        alreadyReviewed: true,
+        salonId,
+        appointmentId: latest.appointmentId,
+        visitDate: latest.completedAt,
+        token: null,
+        path: null,
+        expiresAt: null,
+      });
+      return;
+    }
+
+    const { token, expiresAt } = createReviewToken({
+      customerId: cid,
+      salonId,
+      appointmentId: latest.appointmentId,
+    });
+    res.json({
+      alreadyReviewed: false,
+      salonId,
+      appointmentId: latest.appointmentId,
+      visitDate: latest.completedAt,
+      token,
+      path: `/r/${salonId}?t=${encodeURIComponent(token)}`,
+      expiresAt,
+    });
   }),
 );
 

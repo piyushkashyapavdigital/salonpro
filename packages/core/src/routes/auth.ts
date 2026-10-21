@@ -188,15 +188,22 @@ authRouter.post(
  * explicitly opted into demo mode (`ALLOW_DEV_OTP`) — so it cannot exist on a
  * real deployment. It lets whoever is running the demo open the app's vendor workspace
  * without juggling one-time codes — the same spirit as the on-screen dev code
- * for the customer app. Pass a `phone` to sign in as that account, or omit it to
- * sign in as the salon owner. Every use is written to the audit log with
+ * for the customer app. Pass a `phone` to sign in as that account, a `role` to
+ * open the first seeded account of that workspace, or omit both to sign in as
+ * the salon owner. Every use is written to the audit log with
  * `method: 'dev_pin'`, so it is never silent.
  */
 authRouter.post(
   '/dev-login',
   handler(async (req, res) => {
     const body = z
-      .object({ pin: z.string().min(3).max(12), phone: z.string().optional() })
+      .object({
+        pin: z.string().min(3).max(12),
+        phone: z.string().optional(),
+        role: z
+          .enum(['super_admin', 'salon_owner', 'branch_manager', 'receptionist', 'customer'])
+          .optional(),
+      })
       .parse(req.body);
 
     /*
@@ -219,6 +226,13 @@ authRouter.post(
       if (!phoneSchema.safeParse(phone).success) throw badRequest('Enter a valid 10 digit mobile number.');
       user = (await one('SELECT id, name, role, status FROM users WHERE phone = ?', phone)) ?? null;
       if (!user) throw notFound('No account uses that number yet. Add the person with the one-time code first.');
+    } else if (body.role) {
+      user =
+        (await one(
+          "SELECT id, name, role, status FROM users WHERE role = ? AND status <> 'deactivated' ORDER BY isDemo DESC, createdAt LIMIT 1",
+          body.role,
+        )) ?? null;
+      if (!user) throw notFound(`No ${body.role.replace(/_/g, ' ')} demo account exists on this server yet.`);
     } else {
       user =
         (await one(

@@ -1,14 +1,14 @@
 /**
  * Coupons the salon is running, loyalty points, and a way through to referrals.
  */
-import React from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { customer } from '../../shared/endpoints';
 import { useAsync } from '../../shared/hooks';
-import { Badge, Banner, Button, Card, Empty, Loading, SectionTitle } from '../../shared/components';
+import { AppSheet, Badge, Banner, Button, Card, Empty, Loading, SectionTitle, type SheetRequest } from '../../shared/components';
 import { colors, font, radius, shadow, space } from '../../shared/theme';
 import { formatDate, formatMoney } from '../../core';
 
@@ -16,9 +16,14 @@ export function OffersScreen() {
   const navigation = useNavigation<any>();
   const offers = useAsync(() => customer.offers(), []);
   const data = offers.data;
+  const [sheet, setSheet] = useState<SheetRequest | null>(null);
 
   const copyCode = (code: string) => {
-    Alert.alert('Coupon code', `${code}\n\nUse it at checkout in the booking screen — the discount is applied by the server.`);
+    setSheet({
+      tone: 'info',
+      title: 'Coupon code',
+      message: `${code}\n\nUse it at checkout in the booking screen — the discount is applied by the server.`,
+    });
   };
 
   return (
@@ -43,7 +48,7 @@ export function OffersScreen() {
             <Card>
               <View style={styles.loyaltyRow}>
                 <View style={styles.loyaltyIcon}>
-                  <MaterialIcons name="stars" size={22} color="#B45309" />
+                  <MaterialIcons name="stars" size={22} color={colors.amber} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.loyaltyTitle}>Loyalty points</Text>
@@ -103,6 +108,7 @@ export function OffersScreen() {
           </>
         ) : null}
       </ScrollView>
+      <AppSheet request={sheet} onClose={() => setSheet(null)} />
     </SafeAreaView>
   );
 }
