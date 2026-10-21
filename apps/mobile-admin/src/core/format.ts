@@ -78,13 +78,22 @@ export function isoDate(d: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function parseCalendarDate(date: string): Date {
+  // Date-only values are calendar dates, not UTC instants. Full ISO timestamps
+  // (for example users.createdAt) must be parsed as-is or appending a time
+  // produces an invalid value.
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00`) : new Date(date);
+}
+
 export function formatDate(date: string, opts: Intl.DateTimeFormatOptions = {}): string {
-  const d = new Date(`${date}T00:00:00`);
+  const d = parseCalendarDate(date);
+  if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', ...opts });
 }
 
 export function formatDateLong(date: string): string {
-  const d = new Date(`${date}T00:00:00`);
+  const d = parseCalendarDate(date);
+  if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 

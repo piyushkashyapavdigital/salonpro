@@ -401,8 +401,8 @@ the real router (the same one Next.js dispatches into on Vercel) against PGlite 
 real Postgres compiled to WebAssembly — seeded deterministically.
 
 ```bash
-bun run test          # everything (162 tests)
-bun run test:shared   # pure helpers: money, time, masking (9)
+bun run test          # everything (163 tests)
+bun run test:shared   # pure helpers: money, time, masking (10)
 bun run test:api      # database, routes, journeys, integrations (140)
 bun run test:next     # the Vercel/Next surface: parity, cron auth, 204/304 handling (13)
 bun run test:smoke    # just the end-to-end journeys (10)
@@ -529,7 +529,7 @@ salonpro/
 │   │   │   ├── seed.ts       # demo seed (--reset) and live bootstrap
 │   │   │   └── routes/ + services/
 │   │   └── test/             # harness + 140 tests (including platform tenant tests)
-│   └── shared/               # types + money/time/format helpers (+ 9 tests)
+│   └── shared/               # types + money/time/format helpers (+ 10 tests)
 ├── scripts/
 │   ├── build-mobile-apks.sh  # sync shared code → gradle assembleRelease → artifacts/
 │   ├── sync-mobile-shared.sh # copy apps/mobile-shared into the native apps

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   addDays,
   daysBetween,
+  formatDate,
+  formatDateLong,
   formatDuration,
   formatMoney,
   formatMoneyShort,
@@ -63,6 +65,19 @@ test('formatDuration is human friendly', () => {
   assert.equal(formatDuration(30), '30 min');
   assert.equal(formatDuration(60), '1h');
   assert.equal(formatDuration(90), '1h 30m');
+});
+
+test('formatDate handles calendar dates and ISO timestamps', () => {
+  assert.equal(formatDate('2026-10-21'), '21 Oct 2026');
+  assert.equal(formatDate('2025-10-24T09:47:54.685Z'), '24 Oct 2025');
+  assert.equal(formatDate('2025-10-24T09:47:54.685Z', { month: 'long' }), '24 October 2025');
+  assert.equal(formatDate('not-a-date'), '—');
+
+  const long = formatDateLong('2025-10-24T09:47:54.685Z');
+  assert.match(long, /^Friday\b/);
+  assert.match(long, /\b24 October\b/);
+  assert.match(long, /\b2025\b/);
+  assert.equal(formatDateLong('not-a-date'), '—');
 });
 
 test('addDays and daysBetween agree', () => {
