@@ -15,6 +15,7 @@ import type {
   Branch,
   RechargeOffer,
   Salon,
+  SalonReview,
   SalonSettings,
   Service,
   SessionUser,
@@ -420,6 +421,22 @@ export interface AdminSettingsResponse {
   integrations: IntegrationFlags;
   payments: { mode: string };
   refundPolicy: string;
+}
+
+export interface AdminReviewsResponse {
+  reviews: SalonReview[];
+  stats: {
+    total: number;
+    average: number;
+    fiveStar: number;
+    fourStar: number;
+    threeStar: number;
+    twoStar: number;
+    oneStar: number;
+    positive: number;
+    privateFeedback: number;
+    googleRedirected: number;
+  };
 }
 
 export interface AdminOffersResponse {

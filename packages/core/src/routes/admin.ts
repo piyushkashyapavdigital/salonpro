@@ -34,6 +34,7 @@ import { refundPayment } from '../services/refunds';
 import { salonReferralStats, dashboard as referralDashboard, ensureReferralCode } from '../services/referral';
 import { listNotifications, notificationStats, reminderSettings, saveReminderSettings, runReminderPass, attemptSendAsync } from '../services/notifications';
 import { readSettings, fullWeekHours, fullWeekWorkingHours } from '../services/settings';
+import { listSalonReviews, normalizeGooglePlaceId, reviewStats } from '../services/reviews';
 
 export const adminRouter = new Router();
 adminRouter.use(requireAuth);
@@ -1125,6 +1126,20 @@ adminRouter.get(
 );
 
 adminRouter.get(
+  '/reviews',
+  requireCapability(can.viewReviews, 'Your role cannot read salon reviews.'),
+  handler(async (req, res) => {
+    const { salonId } = await scope(req);
+    const limit = z.coerce.number().int().min(1).max(500).optional().parse(req.query.limit);
+    const [reviews, stats] = await Promise.all([
+      listSalonReviews(salonId, limit ?? 100),
+      reviewStats(salonId),
+    ]);
+    res.json({ reviews, stats });
+  }),
+);
+
+adminRouter.get(
   '/settings',
   handler(async (req, res) => {
     const { salonId } = await scope(req);
@@ -1154,13 +1169,25 @@ adminRouter.patch(
         slotGranularityMinutes: z.number().int().min(5).max(60).optional(),
         loyaltyEnabled: z.boolean().optional(),
         loyaltyPointsPerHundred: z.number().int().min(0).max(100).optional(),
+        googlePlaceId: z.string().trim().max(300).nullable().optional(),
       })
       .parse(req.body);
     const salon = await one<{ settings: string; name: string; address: string; contact: string | null }>(
       'SELECT settings, name, address, contact FROM salons WHERE id = ?',
       salonId,
     );
-    const settings = { ...readSettings(salon?.settings), ...body };
+    let googlePlaceId: string | null | undefined;
+    if (body.googlePlaceId !== undefined) {
+      googlePlaceId = normalizeGooglePlaceId(body.googlePlaceId);
+      if (body.googlePlaceId && !googlePlaceId) {
+        throw badRequest('That does not look like a Google Place ID. Paste the ID from Google Maps (it usually starts with ChIJ).');
+      }
+    }
+    const settings = {
+      ...readSettings(salon?.settings),
+      ...body,
+      ...(body.googlePlaceId !== undefined ? { googlePlaceId: googlePlaceId ?? null } : {}),
+    };
     await run(
       'UPDATE salons SET name = ?, address = ?, contact = ?, settings = ? WHERE id = ?',
       body.name ?? salon!.name,

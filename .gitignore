@@ -39,6 +39,11 @@ Thumbs.db
 artifacts/*.apk
 *.cxx/
 
+# --- screenshots -------------------------------------------------------------
+# Captured UI screenshots are local evidence, not source; keep the folder out
+# of git while retaining it on the machine that captured them.
+screenshot/
+
 # --- logs -------------------------------------------------------------------
 *.log
 bun-debug.log*

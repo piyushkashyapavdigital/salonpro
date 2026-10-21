@@ -17,6 +17,7 @@ import type {
   AdminOverviewResponse,
   AdminPaymentsResponse,
   AdminRemindersResponse,
+  AdminReviewsResponse,
   AdminServicesResponse,
   AdminSettingsResponse,
   AdminStaffResponse,
@@ -305,6 +306,8 @@ export const admin = {
 
   settings: () => api<AdminSettingsResponse>('/admin/settings'),
   updateSettings: (body: Record<string, unknown>) => api<{ ok: true; salon?: unknown }>('/admin/settings', { method: 'PATCH', body }),
+
+  reviews: (params: { limit?: number } = {}) => api<AdminReviewsResponse>(`/admin/reviews${qs(params)}`),
 
   offers: () => api<AdminOffersResponse>('/admin/offers'),
   createRechargeOffer: (body: Record<string, unknown>) =>

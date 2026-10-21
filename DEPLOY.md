@@ -60,7 +60,27 @@ provider configured you will see `otpDelivery:false`, `razorpay:false`, `push:fa
   `SALONPRO_API_BASE=https://<your-project>.vercel.app bash scripts/build-mobile-apks.sh`
   just makes it the default.)
 
-## 5. Reminder sweeps (day 7/14/30 + tomorrow's appointments)
+## 5. Connect Google reviews
+
+The first request after deploy runs the schema migration that adds
+`salon_reviews` automatically. Then, in the app:
+
+1. Sign in as the salon owner → **More → Settings → Google reviews**.
+2. Paste the salon's Google **Place ID** (or a Google Maps URL containing
+   `place_id` / `query_place_id`) and tap **Connect Google**.
+3. Share the displayed hosted review page: `https://<your-project>.vercel.app/r/<salonId>`.
+
+Verify the public page and API:
+
+```bash
+curl -s https://<your-project>.vercel.app/api/public/reviews/<salonId> | head -c 400
+```
+
+`googleConfigured` should be `true`. If no Place ID is set, 4–5★ feedback is
+still saved for the salon, but customers are told Google is not connected and
+are never sent to a dead Google link.
+
+## 6. Reminder sweeps (day 7/14/30 + tomorrow's appointments)
 
 Vercel's free plan runs cron **once a day** (the two jobs in
 `apps/next/vercel.json` stay as a backstop). The 15-minute sweeps are done by

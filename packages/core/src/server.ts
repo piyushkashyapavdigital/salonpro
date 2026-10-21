@@ -17,6 +17,7 @@ import { customerRouter } from './routes/customer';
 import { adminRouter } from './routes/admin';
 import { paymentsRouter } from './routes/payments';
 import { platformRouter } from './routes/platform';
+import { publicRouter } from './routes/public';
 import { REFUND_POLICY } from './lib/policy';
 
 /* ------------------------------------------------------------------ */
@@ -46,6 +47,7 @@ export function buildRouter() {
   });
 
   root.use('/api/auth', authRouter);
+  root.use('/api/public', publicRouter);
   root.use('/api/catalog', catalogRouter);
   root.use('/api/customer', customerRouter);
   root.use('/api/payments', paymentsRouter);

@@ -13,6 +13,7 @@ import { StaffScreen } from '../screens/vendor/StaffScreen';
 import { ServicesScreen } from '../screens/vendor/ServicesScreen';
 import { RemindersScreen } from '../screens/vendor/RemindersScreen';
 import { OffersScreen } from '../screens/vendor/OffersScreen';
+import { ReviewsScreen } from '../screens/vendor/ReviewsScreen';
 import { SettingsScreen } from '../screens/vendor/SettingsScreen';
 import { WalkInScreen } from '../screens/vendor/WalkInScreen';
 import { ServerSettingsScreen } from '../screens/ServerSettingsScreen';
@@ -85,6 +86,7 @@ export function VendorNavigator() {
       <Stack.Screen name="Services" component={ServicesScreen} />
       <Stack.Screen name="Reminders" component={RemindersScreen} />
       <Stack.Screen name="Offers" component={OffersScreen} />
+      <Stack.Screen name="Reviews" component={ReviewsScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
       <Stack.Screen name="ServerSettings" component={ServerSettingsScreen} />
     </Stack.Navigator>

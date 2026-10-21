@@ -81,6 +81,7 @@ export const PERMISSIONS = [
   'salon.payment.refund',
   'salon.wallet.adjust',
   'salon.report.read',
+  'salon.review.read',
   'salon.offer.read',
   'salon.offer.manage',
   'salon.reminder.read',
@@ -133,6 +134,7 @@ const ALL_SALON_PERMISSIONS: readonly Permission[] = [
   'salon.payment.refund',
   'salon.wallet.adjust',
   'salon.report.read',
+  'salon.review.read',
   'salon.offer.read',
   'salon.offer.manage',
   'salon.reminder.read',
@@ -159,6 +161,7 @@ const MANAGER_PERMISSIONS: readonly Permission[] = [
   'salon.payment.collect',
   'salon.payment.refund',
   'salon.report.read',
+  'salon.review.read',
   'salon.offer.read',
   'salon.reminder.read',
   'salon.referral.read',
@@ -318,6 +321,26 @@ export interface SalonSettings {
   loyaltyEnabled: boolean;
   loyaltyPointsPerHundred: number;
   templates: Record<ReminderTemplate, string>;
+  /**
+   * The salon's public Google Place ID. 4–5★ reviews on the hosted review page
+   * use it to open Google's "write a review" form; 1–3★ feedback never leaves
+   * SalonPro. Null until the owner connects Google.
+   */
+  googlePlaceId: string | null;
+}
+
+/** Private feedback / review captured by the hosted review page. */
+export interface SalonReview {
+  id: string;
+  salonId: string;
+  rating: number;
+  message: string;
+  customerName: string | null;
+  customerPhone: string | null;
+  /** True only when the customer was sent to Google after a 4–5★ rating. */
+  googleRedirected: boolean;
+  source: string;
+  createdAt: string;
 }
 
 export interface ReferralConfig {

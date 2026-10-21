@@ -33,6 +33,7 @@ export const DEFAULT_SALON_SETTINGS: SalonSettings = {
   loyaltyEnabled: true,
   loyaltyPointsPerHundred: 1,
   templates: DEFAULT_TEMPLATES,
+  googlePlaceId: null,
 };
 
 export function readSettings(raw: unknown): SalonSettings {
@@ -42,6 +43,10 @@ export function readSettings(raw: unknown): SalonSettings {
     ...stored,
     referral: { ...DEFAULT_SALON_SETTINGS.referral, ...(stored.referral ?? {}) },
     templates: { ...DEFAULT_TEMPLATES, ...(stored.templates ?? {}) },
+    googlePlaceId:
+      typeof stored.googlePlaceId === 'string' && stored.googlePlaceId.trim()
+        ? stored.googlePlaceId.trim()
+        : null,
   };
 }
 

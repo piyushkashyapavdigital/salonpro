@@ -349,6 +349,33 @@ a **Server address** screen reachable from sign-in and from More → Server addr
   provider connected, "Run now" queues messages and the screen says so **before**
   you tap.
 
+### Google review funnel
+
+The vendor workspace has a **Reviews** screen and a **Google reviews** section in
+**Settings**:
+
+1. The owner pastes the salon's Google **Place ID** (or a Google Maps URL that
+   contains one). Only the owner can change it; managers can read reviews;
+   receptionists cannot.
+2. The same card shows the hosted review page:
+   `https://<your-api-host>/r/<salonId>`. Share that link with customers.
+3. A customer taps 1–5 stars. **4–5★** customers get a button that copies their
+   written review and opens Google's `writereview` form in a new tab; Google does
+   not allow websites to prefill review text, so the page copies it for one-tap
+   pasting. **1–3★** feedback is saved only in SalonPro and is never given a
+   Google URL — the server, not the browser, decides this.
+4. The vendor **Reviews** screen shows the average, the rating breakdown, Google
+   hand-offs and private feedback, with All / 4–5★ / 1–3★ filters.
+
+Every rating is stored in `salon_reviews`; `googleRedirected` is true only for a
+4–5★ request made while a Place ID is connected. The public API is
+`GET/POST /api/public/reviews/:salonId` and the owner API is
+`GET /api/admin/reviews`.
+
+> **Policy note:** routing only happy customers to Google is commonly called
+> “review gating”, and Google's review policies may prohibit it. Confirm the
+> policy for your market before running this funnel at scale.
+
 ## Demo accounts
 
 Password for all demo logins: **`salonpro123`**. Demo users are seeded with
@@ -374,9 +401,9 @@ the real router (the same one Next.js dispatches into on Vercel) against PGlite 
 real Postgres compiled to WebAssembly — seeded deterministically.
 
 ```bash
-bun run test          # everything (148 tests)
+bun run test          # everything (162 tests)
 bun run test:shared   # pure helpers: money, time, masking (9)
-bun run test:api      # database, routes, journeys, integrations (126)
+bun run test:api      # database, routes, journeys, integrations (140)
 bun run test:next     # the Vercel/Next surface: parity, cron auth, 204/304 handling (13)
 bun run test:smoke    # just the end-to-end journeys (10)
 ```
@@ -387,10 +414,11 @@ What the suites cover:
 |---|---|---|
 | **shared** | 9 | Paise formatting, rupee round-tripping, phone masking, time conversion, date math, status labels |
 | **`db.test.ts`** | 22 | `toPg()` translation (placeholders, camelCase quoting, literals and comments untouched); `scalar`/`COUNT` return numbers, not bigint strings; `tx()` commits, rolls back, flattens nested calls and never wedges the driver; `migrate()` is idempotent; **the ledger has no `UPDATE`/`DELETE` path in the source** |
-| **`routes.test.ts`** | 6 | **All 98 HTTP routes** exist and answer without a 5xx; every protected route 401s anonymously; a customer token gets 403 on every admin route; the 34 endpoints the apps load daily return 200; CSV exports are real files |
+| **`routes.test.ts`** | 6 | **All 101 HTTP routes** exist and answer without a 5xx; every protected route 401s anonymously; a customer token gets 403 on every admin route; the 35 endpoints the apps load daily return 200; CSV exports are real files |
+| **`reviews.test.ts`** | 6 | The hosted review funnel: Place ID normalisation, owner-only Google connection, 4–5★ gets a Google URL, 1–3★ is stored locally with no Google URL, managers can read reviews, receptionists cannot, and suspended salons have no public page |
 | **`smoke.test.ts`** | 10 | Whole journeys over HTTP: OTP sign-up → recharge → book from the wallet → receipt; cancel refunds and frees the slot; data export + account deletion; a completed visit reaching the dashboard, ledger, leaderboard, revenue report and audit log; the ₹50+₹50 referral paying out after qualification; then SQL invariants (no orphans, no overdrawn wallet, no half-written ledger row) |
-| **`integrations.test.ts`** | 8 | **Honesty:** the dev OTP mock labels itself and says "no real SMS was sent"; production **refuses with 503** rather than faking an OTP; notifications are never marked `sent` without a provider; opt-outs are `suppressed`; registering a push device creates no phantom delivery; `/api/health` reports every integration as `false` while unconfigured; **the production bootstrap creates a clean database** (1 user, 1 salon, 1 branch, 3 offers, zero of anything else) and its owner can sign in |
-| **existing API suites** | 73 | Auth/sessions, booking and the status machine, wallet maths and bonus-before-cash, payments and signature verification, referrals, RBAC and branch scoping, validation and error shapes, analytics |
+| **`integrations.test.ts`** | 9 | **Honesty:** the dev OTP mock labels itself and says "no real SMS was sent"; production **refuses with 503** rather than faking an OTP; notifications are never marked `sent` without a provider; opt-outs are `suppressed`; registering a push device creates no phantom delivery; `/api/health` reports every integration as `false` while unconfigured; **the production bootstrap creates a clean database** (1 user, 1 salon, 1 branch, 3 offers, zero of anything else) and its owner can sign in |
+| **existing API suites** | 87 | Auth/sessions, booking and the status machine, wallet maths and bonus-before-cash, payments and signature verification, referrals, RBAC and branch scoping, validation and error shapes, analytics |
 
 ### Test architecture
 
@@ -500,7 +528,7 @@ salonpro/
 │   │   │   ├── db.ts         # driver (pg | PGlite), toPg() translation, schema, tx()
 │   │   │   ├── seed.ts       # demo seed (--reset) and live bootstrap
 │   │   │   └── routes/ + services/
-│   │   └── test/             # harness + 134 tests (including platform tenant tests)
+│   │   └── test/             # harness + 140 tests (including platform tenant tests)
 │   └── shared/               # types + money/time/format helpers (+ 9 tests)
 ├── scripts/
 │   ├── build-mobile-apks.sh  # sync shared code → gradle assembleRelease → artifacts/

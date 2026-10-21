@@ -323,6 +323,7 @@ authRouter.post(
  */
 authRouter.post(
   '/invite',
+  requireAuth,
   requirePermission('salon.staff.manage', 'Only owners and managers can invite staff.'),
   handler(async (req, res) => {
     const body = z

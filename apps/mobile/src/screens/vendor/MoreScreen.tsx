@@ -57,6 +57,9 @@ export function MoreScreen() {
           {can('salon.report.read') ? (
             <MenuRow icon="insights" label="Reports & analytics" hint="Revenue, retention, top customers" onPress={() => navigation.navigate('Analytics')} />
           ) : null}
+          {can('salon.review.read') ? (
+            <MenuRow icon="star" label="Reviews" hint="Google hand-offs and private 1–3★ feedback" onPress={() => navigation.navigate('Reviews')} />
+          ) : null}
           {can('salon.appointment.read') ? (
             <MenuRow icon="event-note" label="Schedule" hint="Move visits through the day" onPress={() => navigation.navigate('Schedule')} />
           ) : null}

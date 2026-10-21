@@ -64,6 +64,10 @@ function buildRoutes(): Route[] {
     { method: 'GET', path: `/catalog/payment-status/${ids.order}`, role: 'public' },
     { method: 'GET', path: '/catalog/cities', role: 'public' },
 
+    /* --- public review page ---------------------------------------- */
+    { method: 'GET', path: '/public/reviews/missing', role: 'public' },
+    { method: 'POST', path: '/public/reviews/missing', role: 'public', body: {} },
+
     /* --- customer app ---------------------------------------------- */
     { method: 'GET', path: '/customer/home', role: 'customer' },
     { method: 'POST', path: '/customer/bookings', role: 'customer', body: {} },
@@ -143,6 +147,7 @@ function buildRoutes(): Route[] {
     { method: 'GET', path: '/admin/users', role: 'owner' },
     { method: 'PATCH', path: `/admin/users/${ids.user}`, role: 'owner', body: {} },
     { method: 'GET', path: '/admin/audit', role: 'owner' },
+    { method: 'GET', path: '/admin/reviews', role: 'owner' },
     { method: 'GET', path: '/admin/settings', role: 'owner' },
     { method: 'PATCH', path: '/admin/settings', role: 'owner', body: {} },
     { method: 'GET', path: '/admin/me', role: 'owner' },
@@ -202,8 +207,8 @@ describe('route surface', () => {
   });
 
   test('the inventory covers the whole documented HTTP surface', () => {
-    /* Auth 9 + catalog 12 + customer 19 + payments 7 + admin 51. */
-    assert.equal(routes.length, 98);
+    /* Auth 9 + public reviews 2 + catalog 12 + customer 19 + payments 7 + admin 52. */
+    assert.equal(routes.length, 101);
     assert.equal(new Set(routes.map((r) => `${r.method} ${r.path.split('?')[0]}`)).size, routes.length, 'duplicate route in the table');
   });
 
@@ -292,6 +297,7 @@ describe('route surface', () => {
       ['/admin/offers', ownerToken],
       ['/admin/users', ownerToken],
       ['/admin/audit', ownerToken],
+      ['/admin/reviews', ownerToken],
       ['/admin/settings', ownerToken],
       ['/admin/me', ownerToken],
       [`/admin/reports/revenue${q({ date, from, to })}`, ownerToken],

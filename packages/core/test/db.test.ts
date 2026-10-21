@@ -236,7 +236,7 @@ describe('schema', () => {
       'refunds', 'referral_codes', 'referrals', 'reward_transactions', 'notifications',
       'notification_preferences', 'push_subscriptions', 'reminder_settings', 'coupons',
       'coupon_redemptions', 'service_records', 'loyalty_accounts', 'loyalty_transactions',
-      'audit_logs', 'data_requests', 'app_meta',
+      'salon_reviews', 'audit_logs', 'data_requests', 'app_meta',
     ];
     for (const table of required) {
       const exists = await h.db.scalar(

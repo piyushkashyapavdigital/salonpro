@@ -776,6 +776,22 @@ CREATE TABLE IF NOT EXISTS loyalty_transactions (
   createdAt TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS salon_reviews (
+  id TEXT PRIMARY KEY,
+  salonId TEXT NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+  rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  message TEXT NOT NULL DEFAULT '',
+  customerName TEXT,
+  customerPhone TEXT,
+  googleRedirected INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'hosted_review',
+  userAgent TEXT,
+  ip TEXT,
+  createdAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reviews_salon ON salon_reviews(salonId, createdAt DESC);
+CREATE INDEX IF NOT EXISTS idx_reviews_rating ON salon_reviews(salonId, rating);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
   id TEXT PRIMARY KEY,
   actorId TEXT NOT NULL,
@@ -809,7 +825,7 @@ CREATE TABLE IF NOT EXISTS app_meta (
  * Bump when `SCHEMA` changes. `ensureSchema()` compares it with what the
  * database reports and only then runs the migrations.
  */
-export const SCHEMA_VERSION = '2';
+export const SCHEMA_VERSION = '3';
 
 /**
  * Create the schema if this database has never seen it.

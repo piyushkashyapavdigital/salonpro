@@ -7,11 +7,12 @@
  * fails on save.
  */
 import React, { useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../shared/auth';
+import { getApiBase } from '../../shared/api';
 import { admin } from '../../shared/endpoints';
 import { errorMessage, useAsync } from '../../shared/hooks';
 import { Badge, Banner, Button, Card, Chip, Empty, Field, Loading, Row, SectionTitle } from '../../shared/components';
@@ -41,6 +42,7 @@ export function SettingsScreen() {
   const [form, setForm] = useState<{ name: string; address: string; contact: string } | null>(null);
   const [brandOpen, setBrandOpen] = useState(false);
   const [newBranch, setNewBranch] = useState<{ name: string; address: string; contact: string } | null>(null);
+  const [placeId, setPlaceId] = useState<string | null>(null);
 
   const run = async (action: () => Promise<unknown>, note: string) => {
     setBusy(true);
@@ -78,6 +80,29 @@ export function SettingsScreen() {
       await admin.updateSettings(body);
       await settings.reload();
     }, note);
+  };
+
+  const reviewPageUrl = salon ? `${getApiBase()}/r/${salon.id}` : '';
+
+  const savePlaceId = async () => {
+    const value = (placeId ?? rules?.googlePlaceId ?? '').trim();
+    await run(async () => {
+      await admin.updateSettings({ googlePlaceId: value || null });
+      setPlaceId(null);
+      await settings.reload();
+    }, value ? 'Google review page connected.' : 'Google review page disconnected.');
+  };
+
+  const shareReviewLink = async () => {
+    if (!reviewPageUrl) return;
+    try {
+      await Share.share({
+        title: `Review ${salon?.name ?? 'our salon'}`,
+        message: `How was your visit to ${salon?.name ?? 'our salon'}? Leave a review here: ${reviewPageUrl}`,
+      });
+    } catch {
+      /* the share sheet is optional — the link is visible on screen too */
+    }
   };
 
   const createBranch = async () => {
@@ -260,6 +285,60 @@ export function SettingsScreen() {
                       style={{ flex: 1 }}
                       onPress={() => void saveRules({ bonusExpiryDays: rules?.bonusExpiryDays ? null : 365 }, 'Bonus expiry updated.')}
                     />
+                  </View>
+                ) : null}
+              </Card>
+
+              <SectionTitle title="Google reviews" />
+              <Card>
+                <Text style={styles.note}>
+                  Share the hosted review page with customers. 4–5★ customers can copy their words and open Google; 1–3★ feedback
+                  is saved privately in Reviews and never sent to Google.
+                </Text>
+                <Row label="Google connection" value={rules?.googlePlaceId ? 'connected' : 'not connected'} emphasis />
+                {isOwner ? (
+                  <>
+                    <Field
+                      label="Google Place ID"
+                      value={placeId ?? rules?.googlePlaceId ?? ''}
+                      onChangeText={setPlaceId}
+                      placeholder="ChIJ… (from Google Maps)"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      hint="Google Maps → your salon → Share → copy the Place ID (or paste the Maps URL)."
+                    />
+                    <View style={styles.actionRow}>
+                      <Button
+                        label={busy ? 'Saving…' : rules?.googlePlaceId ? 'Update Place ID' : 'Connect Google'}
+                        loading={busy}
+                        style={{ flex: 1 }}
+                        onPress={() => void savePlaceId()}
+                      />
+                      {rules?.googlePlaceId ? (
+                        <Button
+                          label="Remove"
+                          variant="ghost"
+                          style={{ flex: 1 }}
+                          onPress={() =>
+                            void run(async () => {
+                              await admin.updateSettings({ googlePlaceId: null });
+                              setPlaceId(null);
+                              await settings.reload();
+                            }, 'Google review page disconnected.')
+                          }
+                        />
+                      ) : null}
+                    </View>
+                  </>
+                ) : null}
+                <Text style={[styles.note, { marginTop: space(3) }]}>Hosted review page</Text>
+                <Text style={styles.reviewLink} selectable>
+                  {reviewPageUrl || '—'}
+                </Text>
+                {reviewPageUrl ? (
+                  <View style={styles.actionRow}>
+                    <Button label="Share review link" variant="secondary" style={{ flex: 1 }} onPress={() => void shareReviewLink()} />
+                    <Button label="Open page" variant="ghost" style={{ flex: 1 }} onPress={() => void Linking.openURL(reviewPageUrl)} />
                   </View>
                 ) : null}
               </Card>
@@ -487,6 +566,7 @@ const styles = StyleSheet.create({
   branchHead: { flexDirection: 'row', alignItems: 'flex-start', gap: space(3) },
   branchName: { fontSize: font.size.md, fontWeight: font.weight.bold, color: colors.ink900 },
   note: { fontSize: font.size.xs, color: colors.ink400, lineHeight: 18, marginTop: 2 },
+  reviewLink: { fontSize: font.size.sm, color: colors.brand700, lineHeight: 20, marginTop: space(1) },
   actionRow: { flexDirection: 'row', gap: space(2), marginTop: space(3) },
   logHead: { flexDirection: 'row', alignItems: 'center', gap: space(3) },
   logAction: { fontSize: font.size.sm, fontWeight: font.weight.semibold, color: colors.ink900, textTransform: 'capitalize' },

@@ -225,6 +225,7 @@ export const can = {
   adjustWallet: (r: Role) => hasPermission(r, 'salon.wallet.adjust'),
   processRefund: (r: Role) => hasPermission(r, 'salon.payment.refund'),
   viewReports: (r: Role) => hasPermission(r, 'salon.report.read'),
+  viewReviews: (r: Role) => hasPermission(r, 'salon.review.read'),
   viewCustomers: (r: Role) => hasPermission(r, 'salon.customer.read'),
   manageReferrals: (r: Role) => hasPermission(r, 'salon.referral.manage'),
   manageSettings: (r: Role) => hasPermission(r, 'salon.user.manage'),

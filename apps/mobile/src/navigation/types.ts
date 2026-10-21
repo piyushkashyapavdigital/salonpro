@@ -53,6 +53,7 @@ export type VendorStackParamList = {
   Services: undefined;
   Reminders: undefined;
   Offers: undefined;
+  Reviews: undefined;
   Settings: undefined;
   ServerSettings: undefined;
 };
