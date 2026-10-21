@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SalonPro server launcher — frees the port, then starts the Next.js API
-# (the one address the customer and admin apps talk to).
+# (the one address the unified app talks to).
 #
 #   bash scripts/serve.sh            # free :4000, build if needed, then start
 #   PORT=4100 bash scripts/serve.sh  # use another port

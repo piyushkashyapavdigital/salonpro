@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from './lib/router';
-import type { Role, SessionUser } from '@salonpro/shared';
-import { ADMIN_ROLES } from '@salonpro/shared';
+import type { Permission, Role, SessionUser } from '@salonpro/shared';
+import { ADMIN_ROLES, hasPermission, permissionsForRole, workspaceForRole } from '@salonpro/shared';
 import { all, one, run, tx } from './db';
 import { clientIp, forbidden, HttpError, tooMany, unauthorized } from './lib/http';
 import { env } from './env';
@@ -99,10 +99,14 @@ export async function buildSessionUser(userId: string): Promise<SessionUser | nu
   let salonId: string | null = null;
   const branchIds: string[] = [];
 
-  if (user.role === 'salon_owner' || user.role === 'super_admin') {
+  if (user.role === 'super_admin') {
+    /* A platform session is deliberately not scoped to a salon. The existing
+     * salon endpoints still fall back to the first salon for compatibility, but
+     * the platform console must never imply ownership of a tenant. */
+    salonId = null;
+  } else if (user.role === 'salon_owner') {
     const salon = await one<{ id: string }>('SELECT id FROM salons WHERE ownerId = ? LIMIT 1', userId);
-    const fallback = salon ?? (await one<{ id: string }>('SELECT id FROM salons LIMIT 1'));
-    salonId = fallback?.id ?? null;
+    salonId = salon?.id ?? null;
     if (salonId) {
       for (const b of await all<{ id: string }>('SELECT id FROM branches WHERE salonId = ?', salonId)) {
         branchIds.push(b.id);
@@ -140,6 +144,13 @@ export async function buildSessionUser(userId: string): Promise<SessionUser | nu
     }
   }
 
+  /* A suspended tenant is blocked at session resolution, not only in the UI.
+   * Platform admins have no salon scope, so they can still reactivate it. */
+  if (salonId && user.role !== 'super_admin') {
+    const tenant = await one<{ status: string }>('SELECT status FROM salons WHERE id = ?', salonId);
+    if (tenant?.status === 'suspended') return null;
+  }
+
   const staff = await staffRowFor(userId);
   return {
     id: user.id,
@@ -150,6 +161,8 @@ export async function buildSessionUser(userId: string): Promise<SessionUser | nu
     salonId,
     branchIds,
     staffId: staff?.id ?? null,
+    permissions: permissionsForRole(user.role),
+    workspace: workspaceForRole(user.role),
   };
 }
 
@@ -197,28 +210,41 @@ export const requireAdmin = (req: Request, res: Response, next: NextFunction) =>
 };
 
 /**
- * Role capabilities. Enforced on the server for every sensitive operation —
- * the UI only hides what the server would refuse anyway.
+ * Capability helpers kept for the existing route modules. Each one is now a
+ * named view over the single permission catalog, so the old admin API and the
+ * new unified app can never disagree about what a role may do.
  */
 export const can = {
-  manageSalon: (r: Role) => r === 'salon_owner' || r === 'super_admin',
-  manageBranches: (r: Role) => r === 'salon_owner' || r === 'super_admin',
-  manageServices: (r: Role) => r === 'salon_owner' || r === 'super_admin' || r === 'branch_manager',
-  manageStaff: (r: Role) => r === 'salon_owner' || r === 'super_admin' || r === 'branch_manager',
-  manageAppointments: (r: Role) =>
-    ['salon_owner', 'super_admin', 'branch_manager', 'receptionist'].includes(r),
-  completeService: (r: Role) =>
-    ['salon_owner', 'super_admin', 'branch_manager', 'receptionist', 'salon_staff'].includes(r),
-  adjustWallet: (r: Role) => r === 'salon_owner' || r === 'super_admin',
-  processRefund: (r: Role) => r === 'salon_owner' || r === 'super_admin' || r === 'branch_manager',
-  viewReports: (r: Role) =>
-    ['salon_owner', 'super_admin', 'branch_manager'].includes(r),
-  viewCustomers: (r: Role) =>
-    ['salon_owner', 'super_admin', 'branch_manager', 'receptionist'].includes(r),
-  manageReferrals: (r: Role) => r === 'salon_owner' || r === 'super_admin',
-  manageSettings: (r: Role) => r === 'salon_owner' || r === 'super_admin',
-  viewAudit: (r: Role) => r === 'salon_owner' || r === 'super_admin',
+  manageSalon: (r: Role) => hasPermission(r, 'salon.settings.manage'),
+  manageBranches: (r: Role) => hasPermission(r, 'salon.branch.manage'),
+  manageServices: (r: Role) => hasPermission(r, 'salon.service.manage'),
+  manageStaff: (r: Role) => hasPermission(r, 'salon.staff.manage'),
+  viewStaff: (r: Role) => hasPermission(r, 'salon.staff.read'),
+  manageAppointments: (r: Role) => hasPermission(r, 'salon.appointment.manage'),
+  completeService: (r: Role) => hasPermission(r, 'salon.appointment.complete'),
+  adjustWallet: (r: Role) => hasPermission(r, 'salon.wallet.adjust'),
+  processRefund: (r: Role) => hasPermission(r, 'salon.payment.refund'),
+  viewReports: (r: Role) => hasPermission(r, 'salon.report.read'),
+  viewCustomers: (r: Role) => hasPermission(r, 'salon.customer.read'),
+  manageReferrals: (r: Role) => hasPermission(r, 'salon.referral.manage'),
+  manageSettings: (r: Role) => hasPermission(r, 'salon.user.manage'),
+  viewAudit: (r: Role) => hasPermission(r, 'salon.audit.read'),
+  viewServices: (r: Role) => hasPermission(r, 'salon.service.read'),
+  viewOffers: (r: Role) => hasPermission(r, 'salon.offer.read'),
+  viewReminders: (r: Role) => hasPermission(r, 'salon.reminder.read'),
+  viewReferrals: (r: Role) => hasPermission(r, 'salon.referral.read'),
 };
+
+/** Throw unless the caller holds an exact permission. */
+export function requirePermission(permission: Permission, message?: string) {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    if (!req.auth) return next(unauthorized());
+    if (!req.auth.permissions.includes(permission)) {
+      return next(forbidden(message ?? `Your role does not include ${permission}.`));
+    }
+    next();
+  };
+}
 
 /** Throw unless the caller's role satisfies the given capability. */
 export function requireCapability(fn: (role: Role) => boolean, message?: string) {

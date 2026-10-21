@@ -503,3 +503,113 @@ export interface RetentionReportResponse {
 }
 
 export interface AdminCustomersResponseWithDetail extends AdminCustomersResponse {}
+
+/* ------------------------------------------------------------------ */
+/* Platform console                                                    */
+/* ------------------------------------------------------------------ */
+
+export interface PlatformOwner {
+  id: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  status: string;
+}
+
+export interface PlatformSalonSummary {
+  id: string;
+  name: string;
+  address: string;
+  contact: string | null;
+  timezone: string;
+  currency: string;
+  status: 'active' | 'suspended' | string;
+  plan: 'trial' | 'growth' | 'pro' | string;
+  trialEndsAt: string | null;
+  createdAt: string;
+  updatedAt: string | null;
+  owner: PlatformOwner | null;
+  branchCount: number;
+  staffCount: number;
+  customerCount: number;
+  appointmentCount: number;
+  completedValue: number;
+}
+
+export interface PlatformAuditEntry {
+  id: string;
+  actorId: string | null;
+  actorName: string | null;
+  actorRole: string | null;
+  action: string;
+  entityType: string;
+  entityId: string;
+  ip: string | null;
+  timestamp: string;
+  meta: Record<string, unknown> | null;
+}
+
+export interface PlatformOverviewResponse {
+  metrics: {
+    salons: number;
+    activeSalons: number;
+    suspendedSalons: number;
+    vendors: number;
+    clients: number;
+    appointments: number;
+    todayAppointments: number;
+    completedValue: number;
+  };
+  recentSalons: PlatformSalonSummary[];
+  recentAudit: PlatformAuditEntry[];
+}
+
+export interface PlatformSalonsResponse {
+  salons: PlatformSalonSummary[];
+}
+
+export interface PlatformSalonDetailResponse {
+  salon: PlatformSalonSummary & { settings: SalonSettings };
+  branches: {
+    id: string;
+    name: string;
+    address: string;
+    contact: string | null;
+    status: string;
+    createdAt: string;
+  }[];
+  recentAudit: PlatformAuditEntry[];
+}
+
+export interface PlatformVendor {
+  id: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  userStatus: string;
+  createdAt: string;
+  salonId: string | null;
+  salonName: string | null;
+  salonStatus: string | null;
+  plan: string | null;
+  staffCount: number;
+  customerCount: number;
+}
+
+export interface PlatformVendorsResponse {
+  vendors: PlatformVendor[];
+}
+
+export interface PlatformAuditResponse {
+  audit: PlatformAuditEntry[];
+}
+
+export interface PlatformCreateSalonInput {
+  name: string;
+  address: string;
+  contact?: string | null;
+  ownerName: string;
+  ownerPhone: string;
+  branchName?: string;
+  plan?: 'trial' | 'growth' | 'pro';
+}

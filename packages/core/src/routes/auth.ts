@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { Router } from '../lib/router';
 import { z } from 'zod';
-import { createSession, audit, buildSessionUser, requireAuth, revokeAllSessions, revokeSession, verifyPassword, hashPassword } from '../auth';
+import { createSession, audit, buildSessionUser, requireAuth, requirePermission, revokeAllSessions, revokeSession, verifyPassword, hashPassword } from '../auth';
 import { all, one, run, tx } from '../db';
 import { badRequest, clientIp, forbidden, handler, HttpError, notFound, unauthorized } from '../lib/http';
 import { env, integrations } from '../env';
@@ -9,6 +9,7 @@ import { assertUnderRateLimit, recordAttempt } from '../auth';
 import { ensureReferralCode, resolveAttribution } from '../services/referral';
 import { walletView } from '../services/wallet';
 import { savePreferences } from '../services/notifications';
+import { SCOPED } from '../lib/scope';
 
 export const authRouter = new Router();
 
@@ -16,6 +17,20 @@ const phoneSchema = z.string().regex(/^[0-9]{10}$/, 'Enter a 10 digit mobile num
 
 function normalizePhone(raw: string) {
   return raw.replace(/\D/g, '').slice(-10);
+}
+
+/**
+ * A session token is created before the salon status check runs. If the tenant
+ * is suspended, throw away that token instead of leaving a live credential that
+ * every later request will reject anyway.
+ */
+async function sessionAfterLogin(userId: string, token: string) {
+  const sessionUser = await buildSessionUser(userId);
+  if (!sessionUser) {
+    await revokeSession(token);
+    throw unauthorized('This salon is suspended. Contact the platform administrator.');
+  }
+  return sessionUser;
 }
 
 /**
@@ -155,13 +170,13 @@ authRouter.post(
     }
 
     const token = await createSession(user.id, req);
-    const sessionUser = (await buildSessionUser(user.id))!;
+    const sessionUser = await sessionAfterLogin(user.id, token);
     await audit(user.id, 'auth.login', 'user', user.id, { method: 'otp' }, clientIp(req));
     const salonId = sessionUser.salonId ?? (await one<{ id: string }>('SELECT id FROM salons LIMIT 1'))?.id ?? null;
     res.json({
       token,
       user: sessionUser,
-      wallet: salonId ? await walletView(salonId, user.id) : null,
+      wallet: sessionUser.role === 'customer' && salonId ? await walletView(salonId, user.id) : null,
     });
   }),
 );
@@ -171,7 +186,7 @@ authRouter.post(
  *
  * Switched on only on a development/test server, or a production server that
  * explicitly opted into demo mode (`ALLOW_DEV_OTP`) — so it cannot exist on a
- * real deployment. It lets whoever is running the demo open the admin app
+ * real deployment. It lets whoever is running the demo open the app's vendor workspace
  * without juggling one-time codes — the same spirit as the on-screen dev code
  * for the customer app. Pass a `phone` to sign in as that account, or omit it to
  * sign in as the salon owner. Every use is written to the audit log with
@@ -214,13 +229,13 @@ authRouter.post(
     if (user.status === 'deactivated') throw unauthorized('This account has been deactivated. Contact the salon.');
 
     const token = await createSession(user.id, req);
-    const sessionUser = (await buildSessionUser(user.id))!;
+    const sessionUser = await sessionAfterLogin(user.id, token);
     await audit(user.id, 'auth.login', 'user', user.id, { method: 'dev_pin' }, clientIp(req));
     const salonId = sessionUser.salonId ?? (await one<{ id: string }>('SELECT id FROM salons LIMIT 1'))?.id ?? null;
     res.json({
       token,
       user: sessionUser,
-      wallet: salonId ? await walletView(salonId, user.id) : null,
+      wallet: sessionUser.role === 'customer' && salonId ? await walletView(salonId, user.id) : null,
       notice: 'DEV MODE — signed in with the developer PIN. No OTP was used and no SMS was sent.',
     });
   }),
@@ -261,12 +276,12 @@ authRouter.post(
       throw unauthorized('Incorrect demo password.');
     }
     const token = await createSession(user.id, req);
-    const sessionUser = (await buildSessionUser(user.id))!;
+    const sessionUser = await sessionAfterLogin(user.id, token);
     const salonId = sessionUser.salonId ?? (await one<{ id: string }>('SELECT id FROM salons LIMIT 1'))?.id ?? null;
     res.json({
       token,
       user: sessionUser,
-      wallet: salonId ? await walletView(salonId, user.id) : null,
+      wallet: sessionUser.role === 'customer' && salonId ? await walletView(salonId, user.id) : null,
       notice: 'DEV MODE — signed in with a seeded demo account.',
     });
   }),
@@ -308,13 +323,8 @@ authRouter.post(
  */
 authRouter.post(
   '/invite',
-  requireAuth,
+  requirePermission('salon.staff.manage', 'Only owners and managers can invite staff.'),
   handler(async (req, res) => {
-    if (!['salon_owner', 'super_admin', 'branch_manager'].includes(req.auth!.role)) {
-      /* 403, not 401: the caller is signed in, they just may not do this. A 401
-       * makes the client sign them out, which is the wrong reaction. */
-      throw forbidden('Only owners and managers can invite staff.');
-    }
     const body = z
       .object({
         name: z.string().trim().min(2),
@@ -325,8 +335,8 @@ authRouter.post(
       })
       .parse(req.body);
     const phone = normalizePhone(body.phone);
-    const salonId = req.auth!.salonId!;
-    if (req.auth!.role !== 'super_admin' && !req.auth!.branchIds.includes(body.branchId)) {
+    const { salonId, branchIds } = await SCOPED(req);
+    if (!branchIds.includes(body.branchId)) {
       throw forbidden('You are not authorised for that branch.');
     }
     const existing = await one<{ id: string }>('SELECT id FROM users WHERE phone = ?', phone);

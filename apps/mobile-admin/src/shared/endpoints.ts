@@ -42,6 +42,12 @@ import type {
   OffersResponse,
   OtpRequestResponse,
   PaymentsConfigResponse,
+  PlatformAuditResponse,
+  PlatformCreateSalonInput,
+  PlatformOverviewResponse,
+  PlatformSalonDetailResponse,
+  PlatformSalonsResponse,
+  PlatformVendorsResponse,
   ProfileResponse,
   RechargeOffersResponse,
   ReferralsResponse,
@@ -356,6 +362,24 @@ export const admin = {
   retentionReport: () => api<RetentionReportResponse>('/admin/reports/retention'),
   availability: (params: { branchId: string; date: string; serviceIds: string[]; staffId?: string }) =>
     api<AvailabilityResponse>(`/admin/availability${qs({ ...params, serviceIds: params.serviceIds.join(',') })}`),
+};
+
+/* ------------------------------------------------------------------ */
+/* Platform console                                                    */
+/* ------------------------------------------------------------------ */
+
+export const platform = {
+  overview: () => api<PlatformOverviewResponse>('/platform/overview'),
+  salons: (params: { status?: string; q?: string } = {}) =>
+    api<PlatformSalonsResponse>(`/platform/salons${qs(params)}`),
+  salon: (id: string) => api<PlatformSalonDetailResponse>(`/platform/salons/${encodeURIComponent(id)}`),
+  createSalon: (body: PlatformCreateSalonInput) =>
+    api<PlatformSalonDetailResponse>('/platform/salons', { method: 'POST', body }),
+  updateSalon: (id: string, body: { name?: string; address?: string; contact?: string | null; status?: 'active' | 'suspended'; plan?: 'trial' | 'growth' | 'pro' }) =>
+    api<PlatformSalonDetailResponse>(`/platform/salons/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+  vendors: (params: { q?: string } = {}) => api<PlatformVendorsResponse>(`/platform/vendors${qs(params)}`),
+  audit: (params: { limit?: number; entityType?: string } = {}) =>
+    api<PlatformAuditResponse>(`/platform/audit${qs(params)}`),
 };
 
 export interface RefundRecord {

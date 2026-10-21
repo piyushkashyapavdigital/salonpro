@@ -7,10 +7,10 @@
 # It will:
 #   1. restart adb (re-triggers the phone's "Allow USB debugging?" prompt)
 #   2. wait until the phone shows as *authorized* (tap ALLOW on the phone)
-#   3. install the customer app and the admin app (whichever are built)
+#   3. install the unified SalonPro app (or the legacy apps, if only those exist)
 #   4. check the local API is reachable on :4000
 #
-# Build the APKs first (if missing) with:
+# Build the APK first (if missing) with:
 #   bash scripts/build-mobile-apks.sh
 #
 set -euo pipefail
@@ -59,8 +59,13 @@ install_one() {
   fi
 }
 
-install_one "$RN_CUSTOMER" "SalonPro (customer app)"
-install_one "$RN_ADMIN" "SalonPro Admin (staff app)"
+install_one "$RN_CUSTOMER" "SalonPro (unified app)"
+if [ -z "$RN_CUSTOMER" ]; then
+  install_one "$RN_ADMIN" "legacy SalonPro Admin"
+else
+  echo
+  echo "==> [3/4] skipping legacy SalonPro Admin — the unified app replaces it"
+fi
 
 echo
 echo "==> [4/4] API check (phone must reach this PC's LAN IP on whatever port the server prints)"
@@ -71,4 +76,4 @@ else
 fi
 
 echo
-echo "Done. Look for the 'SalonPro' and 'SalonPro Admin' icons on the phone."
+echo "Done. Look for the 'SalonPro' icon on the phone — it opens the platform, salon or client workspace from the signed-in role."

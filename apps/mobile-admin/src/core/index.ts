@@ -30,7 +30,7 @@ export const ROLES = [
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_LABEL: Record<Role, string> = {
-  super_admin: 'Super Admin',
+  super_admin: 'Platform Admin',
   salon_owner: 'Salon Owner',
   branch_manager: 'Branch Manager',
   receptionist: 'Receptionist',
@@ -38,7 +38,7 @@ export const ROLE_LABEL: Record<Role, string> = {
   customer: 'Customer',
 };
 
-/** Roles that can open the owner dashboard. */
+/** Roles that can open a staff/vendor workspace. */
 export const ADMIN_ROLES: Role[] = [
   'super_admin',
   'salon_owner',
@@ -46,6 +46,199 @@ export const ADMIN_ROLES: Role[] = [
   'receptionist',
   'salon_staff',
 ];
+
+/* ------------------------------------------------------------------ */
+/* Permissions                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The permission catalog is the contract between the API and every client.
+ *
+ * Roles are only bundles of these strings. The API checks the permission on
+ * every sensitive route; the mobile app uses the same list to decide what to
+ * render. Hiding a tab is a UX decision, never a security boundary.
+ */
+export const PERMISSIONS = [
+  /* platform */
+  'platform.metrics.read',
+  'platform.salon.read',
+  'platform.salon.manage',
+  'platform.vendor.read',
+  'platform.vendor.invite',
+  'platform.audit.read',
+
+  /* salon / vendor */
+  'salon.read',
+  'salon.settings.manage',
+  'salon.branch.read',
+  'salon.branch.manage',
+  'salon.service.read',
+  'salon.service.manage',
+  'salon.staff.read',
+  'salon.staff.manage',
+  'salon.customer.read',
+  'salon.customer.manage',
+  'salon.appointment.read',
+  'salon.appointment.manage',
+  'salon.appointment.complete',
+  'salon.payment.read',
+  'salon.payment.collect',
+  'salon.payment.refund',
+  'salon.wallet.adjust',
+  'salon.report.read',
+  'salon.offer.read',
+  'salon.offer.manage',
+  'salon.reminder.read',
+  'salon.reminder.manage',
+  'salon.referral.read',
+  'salon.referral.manage',
+  'salon.user.manage',
+  'salon.audit.read',
+
+  /* client */
+  'client.profile.read',
+  'client.profile.manage',
+  'client.booking.read',
+  'client.booking.create',
+  'client.booking.cancel',
+  'client.wallet.read',
+  'client.payment.create',
+  'client.offer.read',
+  'client.referral.read',
+  'client.notification.read',
+] as const;
+
+export type Permission = (typeof PERMISSIONS)[number];
+
+const PLATFORM_PERMISSIONS: readonly Permission[] = [
+  'platform.metrics.read',
+  'platform.salon.read',
+  'platform.salon.manage',
+  'platform.vendor.read',
+  'platform.vendor.invite',
+  'platform.audit.read',
+];
+
+const ALL_SALON_PERMISSIONS: readonly Permission[] = [
+  'salon.read',
+  'salon.settings.manage',
+  'salon.branch.read',
+  'salon.branch.manage',
+  'salon.service.read',
+  'salon.service.manage',
+  'salon.staff.read',
+  'salon.staff.manage',
+  'salon.customer.read',
+  'salon.customer.manage',
+  'salon.appointment.read',
+  'salon.appointment.manage',
+  'salon.appointment.complete',
+  'salon.payment.read',
+  'salon.payment.collect',
+  'salon.payment.refund',
+  'salon.wallet.adjust',
+  'salon.report.read',
+  'salon.offer.read',
+  'salon.offer.manage',
+  'salon.reminder.read',
+  'salon.reminder.manage',
+  'salon.referral.read',
+  'salon.referral.manage',
+  'salon.user.manage',
+  'salon.audit.read',
+];
+
+const MANAGER_PERMISSIONS: readonly Permission[] = [
+  'salon.read',
+  'salon.branch.read',
+  'salon.service.read',
+  'salon.service.manage',
+  'salon.staff.read',
+  'salon.staff.manage',
+  'salon.customer.read',
+  'salon.customer.manage',
+  'salon.appointment.read',
+  'salon.appointment.manage',
+  'salon.appointment.complete',
+  'salon.payment.read',
+  'salon.payment.collect',
+  'salon.payment.refund',
+  'salon.report.read',
+  'salon.offer.read',
+  'salon.reminder.read',
+  'salon.referral.read',
+];
+
+const RECEPTION_PERMISSIONS: readonly Permission[] = [
+  'salon.read',
+  'salon.branch.read',
+  'salon.service.read',
+  'salon.customer.read',
+  'salon.customer.manage',
+  'salon.appointment.read',
+  'salon.appointment.manage',
+  'salon.appointment.complete',
+  'salon.payment.read',
+  'salon.payment.collect',
+];
+
+const STAFF_PERMISSIONS: readonly Permission[] = [
+  'salon.read',
+  'salon.branch.read',
+  'salon.service.read',
+  'salon.appointment.read',
+  'salon.appointment.complete',
+];
+
+const CLIENT_PERMISSIONS: readonly Permission[] = [
+  'client.profile.read',
+  'client.profile.manage',
+  'client.booking.read',
+  'client.booking.create',
+  'client.booking.cancel',
+  'client.wallet.read',
+  'client.payment.create',
+  'client.offer.read',
+  'client.referral.read',
+  'client.notification.read',
+];
+
+/**
+ * Role -> permission bundles.
+ *
+ * `super_admin` keeps the salon bundle temporarily so the existing admin
+ * screens keep working while the platform console is introduced. The target
+ * state is platform permissions only, plus an audited support-mode token.
+ */
+export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
+  super_admin: [...PLATFORM_PERMISSIONS, ...ALL_SALON_PERMISSIONS],
+  salon_owner: ALL_SALON_PERMISSIONS,
+  branch_manager: MANAGER_PERMISSIONS,
+  receptionist: RECEPTION_PERMISSIONS,
+  salon_staff: STAFF_PERMISSIONS,
+  customer: CLIENT_PERMISSIONS,
+};
+
+export function permissionsForRole(role: Role): Permission[] {
+  return [...ROLE_PERMISSIONS[role]];
+}
+
+export function hasPermission(role: Role, permission: Permission): boolean {
+  return ROLE_PERMISSIONS[role].includes(permission);
+}
+
+/* ------------------------------------------------------------------ */
+/* Workspaces                                                          */
+/* ------------------------------------------------------------------ */
+
+export const WORKSPACES = ['platform', 'vendor', 'client'] as const;
+export type Workspace = (typeof WORKSPACES)[number];
+
+export function workspaceForRole(role: Role): Workspace {
+  if (role === 'super_admin') return 'platform';
+  if (role === 'customer') return 'client';
+  return 'vendor';
+}
 
 export type UserStatus = 'active' | 'invited' | 'deactivated';
 
@@ -73,6 +266,13 @@ export interface SessionUser {
   branchIds: string[];
   /** staff row id when the user is a stylist/staff member */
   staffId: string | null;
+  /**
+   * The role's permission bundle, resolved by the server on every request.
+   * Clients may render from it, but every route still enforces it server-side.
+   */
+  permissions: Permission[];
+  /** Which workspace the unified app should open. */
+  workspace: Workspace;
 }
 
 export interface Branch {

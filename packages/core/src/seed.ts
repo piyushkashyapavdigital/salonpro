@@ -164,11 +164,11 @@ export async function runBootstrap(args: BootstrapArgs): Promise<boolean> {
   console.log(`   Owner    ${args.ownerName} (${phone})`);
   console.log(`   Branch   ${args.branchName ?? `${args.salonName} — Main branch`}`);
   console.log('');
-  console.log('   Sign in on the admin app with that mobile number. OTP delivery follows');
+  console.log("   Sign in on the app's vendor workspace with that mobile number. OTP delivery follows");
   console.log('   server configuration: without an SMS provider you get the development');
   console.log('   code on screen (never a fake "SMS sent" message).');
   console.log('');
-  console.log('   Next: add services, staff and branches from the admin app. No demo data was created.');
+  console.log('   Next: add services, staff and branches from the vendor workspace. No demo data was created.');
   console.log('');
   return true;
 }

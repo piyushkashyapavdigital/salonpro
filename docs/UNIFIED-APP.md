@@ -1,8 +1,13 @@
 # Unified SalonPro app — architecture
 
-Status: proposed, pending sign-off on the three decisions in §10.
+Status: **implemented in 2.0.0** (the decisions in §10 are confirmed).
 Scope: merge `mobile-customer` + `mobile-admin` into one binary with three
 workspaces and one server-enforced permission model.
+
+The unified app lives in `apps/mobile` and keeps the package
+`com.salonpro.app`. The old `apps/mobile-customer` and `apps/mobile-admin`
+projects remain in the tree as frozen 1.0.5 reference builds; new work happens
+in `apps/mobile`.
 
 ## 1. Product hierarchy
 
@@ -46,10 +51,10 @@ App
    └─ UpdateProvider
       └─ NavigationContainer
          └─ RootNavigator
-            ├─ signed out ................ SignInStack
-            ├─ role customer ............ ClientNavigator
-            ├─ vendor role .............. VendorNavigator
-            └─ role super_admin ......... PlatformNavigator
+            ├─ no session ................ AuthNavigator (SignIn)
+            ├─ workspace = client ....... ClientNavigator
+            ├─ workspace = vendor ....... VendorNavigator
+            └─ workspace = platform ..... PlatformNavigator
 ```
 
 ### Client workspace (existing customer app)
@@ -59,7 +64,7 @@ App
 Pushed screens: visit detail, offers, referral, notifications, profile edit,
 server address.
 
-### Vendor workspace (existing admin app)
+### Vendor workspace (reused admin screens)
 
 Bottom tabs are **built from permissions**, not hard-coded by role:
 
@@ -72,19 +77,24 @@ Bottom tabs are **built from permissions**, not hard-coded by role:
 | More | always |
 
 `More` shows only rows the caller can use: analytics, staff, services, offers,
-reminders, salon settings, users, audit. A stylist gets Today + Schedule + More
-(not Customers/Money); a receptionist gets Schedule + Customers + More; an owner
-gets everything.
+reminders, salon settings, users, audit. A stylist gets Schedule + More (not
+Today/Customers/Money); a receptionist gets Schedule + Customers + Money + More;
+a manager and the owner get everything the catalog allows.
 
-This is the same visual language as today, so no screen rewrite is needed — only
-a different navigator and permission predicates.
+This is the same visual language as the old admin app, so the screens were
+reused — only the navigator and permission predicates changed. Mutation
+affordances on the reused screens are hidden when the caller lacks the matching
+permission (for example, a stylist sees the service menu read-only).
 
 ### Platform workspace (new)
 
 `Overview · Salons · Vendors · Audit · Account`
 
-- **Overview** — number of salons, active/trial/suspended, customers, bookings,
-  GMV across the platform (aggregate only).
+- **Overview** — number of salons, active/suspended, owners, clients, bookings
+  and completed service value across the platform (aggregate only). It is
+  labelled "completed value", not GMV, because it is the sum of completed
+  `service_records.finalAmount`; it is not a payment-processor settlement
+  figure.
 - **Salons** — list, search, status; create salon; open a salon's summary;
   suspend/reactivate.
 - **Vendors** — owner accounts and invitations; which salon they own.
@@ -92,9 +102,10 @@ a different navigator and permission predicates.
   invited), with actor and timestamp.
 - **Account** — identity, app version, server address, sign out, update check.
 
-Platform admin must **not** fall back to "the first salon" the way
-`buildSessionUser()` does today. A platform session has `salonId = null` unless
-the admin explicitly enters a salon through an audited support action.
+`buildSessionUser()` gives a platform session `salonId = null`; it never falls
+back to the first salon. The temporary compatibility exception is that
+`super_admin` still carries the salon permission bundle and can use `/admin/*`
+with the old first-salon scope until audited support mode replaces it.
 
 ## 3. Permission catalog
 
@@ -133,8 +144,11 @@ Permissions are the contract. Roles are only bundles of permissions.
 | `salon.payment.refund` | ✓ | ✓ | – | – |
 | `salon.wallet.adjust` | ✓ | – | – | – |
 | `salon.report.read` | ✓ | ✓ | – | – |
+| `salon.offer.read` | ✓ | ✓ | – | – |
 | `salon.offer.manage` | ✓ | – | – | – |
+| `salon.reminder.read` | ✓ | ✓ | – | – |
 | `salon.reminder.manage` | ✓ | – | – | – |
+| `salon.referral.read` | ✓ | ✓ | – | – |
 | `salon.referral.manage` | ✓ | – | – | – |
 | `salon.user.manage` | ✓ | – | – | – |
 | `salon.audit.read` | ✓ | – | – | – |
@@ -149,7 +163,8 @@ Permissions are the contract. Roles are only bundles of permissions.
 ### Server is authoritative
 
 - `/auth/otp/verify`, `/auth/dev-login`, `/auth/demo-login` and `/auth/me` return
-  `permissions: Permission[]` alongside `user`.
+  a `user` object that includes `permissions: Permission[]` and
+  `workspace: 'platform' | 'vendor' | 'client'`.
 - Every sensitive route uses `requirePermission('...')`.
 - The mobile app uses the same catalog only to decide what to render. A hidden
   tab is not security.
@@ -162,10 +177,10 @@ Permissions are the contract. Roles are only bundles of permissions.
 
 ```
 POST /api/auth/otp/request
-POST /api/auth/otp/verify       -> { token, user, permissions, wallet }
+POST /api/auth/otp/verify       -> { token, user: { permissions, workspace, ... }, wallet }
 POST /api/auth/dev-login
 POST /api/auth/demo-login
-GET  /api/auth/me               -> { user, permissions, wallet }
+GET  /api/auth/me               -> { user: { permissions, workspace, ... }, wallet }
 POST /api/auth/logout
 ```
 
@@ -182,14 +197,21 @@ POST  /api/platform/salons
 GET   /api/platform/salons/:id
 PATCH /api/platform/salons/:id
 GET   /api/platform/vendors
-POST  /api/platform/vendors/invite
 GET   /api/platform/audit
 ```
 
+There is deliberately no separate "invite a vendor without a salon" route in
+v1: one salon per user means an owner account is only useful with its tenant.
 `POST /platform/salons` creates, in one transaction: salon, first branch,
 default salon settings, three standard recharge offers, owner user
 (`role = salon_owner`, `status = invited`). No SMS is claimed; the owner signs in
-with OTP when they have a code.
+with OTP when they have a code. `platform.vendor.invite` remains in the catalog
+for the future invitation flow.
+
+Suspending a salon is enforced in `buildSessionUser()`: any non-platform session
+scoped to that salon resolves to `null`, and the login paths revoke the token
+they just minted instead of returning a broken session. Reactivating the salon
+restores access to existing, unrevoked sessions.
 
 ### Vendor / client
 
@@ -272,6 +294,7 @@ Existing installs:
 |---|---|---|
 | SalonPro (customer) | `com.salonpro.app` | 1.0.5 |
 | SalonPro Admin | `com.salonpro.admin` | 1.0.5 |
+| SalonPro (unified) | `com.salonpro.app` | 2.0.0 |
 
 The unified app keeps **`com.salonpro.app`** and the name **SalonPro**. This lets
 the installed customer app self-update through the existing updater. The admin
@@ -279,50 +302,62 @@ package is retired.
 
 Consequences:
 
-- Customers: 1.0.5 → 2.0.0 in-app update works normally.
+- Customers: 1.0.5 → 2.0.0 in-app update works normally (versionCode 7).
 - Admin users: Android refuses to install a different package over
   `com.salonpro.admin`. They install the unified APK once, manually, then use one
   app. Server data is unchanged; they sign in with the same phone.
 - The 1.0.5 admin build stays available as a bridge but cannot self-migrate to a
-  different package; the release notes must say so plainly.
-- Keep the 2.0.0 asset named `mobile-customer-2.0.0.apk` so 1.0.5 customer
-  updaters can find it. From 2.0.1 the app may also accept a `salonpro-` prefix;
-  old prefixes remain supported.
+  different package; the release notes say so plainly.
+- The 2.0.0 asset is named `mobile-customer-2.0.0.apk` so 1.0.5 customer
+  updaters can find it. The unified build sets `APP_FLAVOR = 'customer'` for the
+  same reason; this is an asset prefix, not the app's identity. From 2.0.1 the
+  updater may also accept a `salonpro-` prefix while keeping old prefixes.
+- Signed with the same debug certificate as 1.0.4/1.0.5
+  (`fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c`).
+  The debug keystore is not committed; the build script expects the existing
+  local keystore in `apps/mobile/android/app/debug.keystore`.
 
-## 9. Phased delivery
+## 9. Delivery status
 
-### Phase 0 — updater test (this release)
+### Phase 0 — updater test (done)
 
-1.0.5, versionCode 6, both packages. Purpose: prove prompt → download progress →
-  SHA-256 → Android installer from an installed 1.0.4. No architecture changes
-  ride along, so a failure is unambiguous.
+1.0.5, versionCode 6, both packages, published as `mobile-1.0.5`. Purpose:
+prove prompt → download progress → SHA-256 → Android installer from an installed
+1.0.4. No architecture changes rode along.
 
-### Phase 1 — server foundation (no UI change)
+### Phase 1 — server foundation (done)
 
-- Add permission catalog + role matrix to `packages/shared`.
-- Return `permissions` from auth endpoints.
-- Add `requirePermission`.
-- Add salon status/plan columns and platform routes.
-- Tests: matrix, route guards, platform create/suspend, tenant isolation.
+- Permission catalog + role matrix in `packages/shared`.
+- `SessionUser.permissions` and `SessionUser.workspace` returned by every login
+  and `/auth/me`.
+- `requirePermission`; existing `can.*` helpers wrap the catalog.
+- Salon `status`, `plan`, `trialEndsAt`, `updatedAt`; `SCHEMA_VERSION = '2'`.
+- Platform routes with tests: create salon/branch/owner/offers, suspend,
+  reactivate, audit, duplicate-phone rejection, suspended-session rejection.
 
-### Phase 2 — unified binary
+### Phase 2 — unified binary (done)
 
-- Create `apps/mobile` from the customer shell; move client screens under
-  `screens/client`, vendor screens under `screens/vendor`.
-- Add `RootNavigator`, `ClientNavigator`, `VendorNavigator`, `PlatformNavigator`.
-- One app.json / Gradle package / build target. Old apps frozen, then removed.
-- Release 2.0.0. Customers update in-app; admin users install manually once.
+- `apps/mobile` created from the customer shell; client screens under
+  `screens/client`, vendor screens under `screens/vendor`, platform screens under
+  `screens/platform`.
+- `RootNavigator`, `ClientNavigator`, `VendorNavigator`, `PlatformNavigator`.
+- One app.json / Gradle package / build target. Old apps frozen as 1.0.5
+  reference builds.
+- 2.0.0 built with versionCode 7 and the 1.0.5 certificate.
 
-### Phase 3 — vendor permission polish
+### Phase 3 — vendor permission polish (done)
 
 - Permission-driven tabs and More rows.
-- Reuse the existing screens; no visual rewrite.
-- Verify each role manually: owner, manager, receptionist, stylist, client.
+- Reused screens; mutation controls hidden where the role lacks the permission
+  (Services is read-only for staff/reception; Offers/Reminders/Settings and
+  wallet adjustment remain owner-only; refunds are owner/manager).
+- Verified by typecheck and the server's role/route tests. On-device manual
+  verification of each role is still pending a connected phone.
 
-### Phase 4 — platform console
+### Phase 4 — platform console (done)
 
-- Overview, salons, vendors, audit screens.
-- Salon creation + owner invitation.
+- Overview, salons, vendors, audit, account screens.
+- Salon creation + invited owner.
 - Suspend/reactivate with audit entries.
 
 ### Phase 5 — optional
@@ -331,17 +366,17 @@ Consequences:
 - Audited "enter salon" support mode.
 - Drizzle only if a concrete need appears.
 
-## 10. Decisions to confirm before Phase 1
+## 10. Confirmed decisions
 
-1. **Package**: keep `com.salonpro.app` for the unified app and require admin
-   users to install once manually? (Recommended.) Alternative: keep
-   `com.salonpro.admin` and make customers migrate manually.
-2. **Platform admin scope**: platform console only in v1, with salon access
-   preserved for compatibility, or platform console + explicit audited support
-   mode from day one?
-3. **Multi-salon membership**: one salon per user for v1 (recommended), or build
-   `salon_members` now?
-4. **ORM**: no ORM now (recommended), Drizzle now, or Prisma.
+1. **Package**: keep `com.salonpro.app` for the unified app; admin users install
+   once manually. `com.salonpro.admin` is retired.
+2. **Platform admin scope**: platform console only in v1, with the existing
+   salon permissions preserved temporarily for compatibility. Audited support
+   mode comes later.
+3. **Multi-salon membership**: one salon per user in v1. No `salon_members`
+   table yet.
+4. **ORM**: no ORM now. Prisma is a poor fit; Drizzle is the only viable future
+   candidate but rewriting tested SQL is not justified.
 
-The rest of the design does not depend on these answers; the permission catalog
-and workspace routing are the same either way.
+The permission catalog and workspace routing are independent of the deferred
+items.

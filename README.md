@@ -1,9 +1,10 @@
 # SalonPro
 
-A salon platform: a customer app, a salon-staff (admin) app, and **one API** —
-backed by a persistent database. A playful, high-contrast interface — hot-magenta over warm cream, candy accents,
-rounded white cards, bottom tab navigation — shipped as two installable React
-Native APKs (customer + salon staff) that talk to one Next.js API.
+A salon platform with **one API** and **one React Native app** that opens three
+role-based workspaces: platform admin → salon vendors (owner, manager, reception,
+stylist) → clients. A playful, high-contrast interface — hot-magenta over warm
+cream, candy accents, rounded white cards, bottom tab navigation — shipped as one
+installable APK that talks to one Next.js API.
 
 > **Honesty first.** This deployment runs Razorpay in **simulated** mode and OTP
 > in **development mock** mode until real keys are provided. When nothing is
@@ -17,7 +18,7 @@ Native APKs (customer + salon staff) that talk to one Next.js API.
 | Layer | Choice | Why |
 |---|---|---|
 | API | **Next.js 16 App Router** (`apps/next`) — one catch-all route handler dispatches into `packages/core` | Deploys to Vercel with no separate server and **no Express anywhere**; one warm function, one database pool |
-| Mobile | **React Native 0.87** (`apps/mobile-customer`, `apps/mobile-admin`) + React Navigation 7 | Real APKs with native navigation, AsyncStorage sessions and one shared UI kit — the same shape as the reference project |
+| Mobile | **React Native 0.87** (`apps/mobile`) + React Navigation 7 | One APK, three workspaces chosen from the server session; native navigation, AsyncStorage sessions and one shared UI kit. Frozen 1.0.5 reference builds live in `apps/mobile-customer` and `apps/mobile-admin` |
 | DB | **Postgres** — Neon (`pg`) in production, **PGlite** (Postgres in WASM) locally and in tests | One SQL dialect everywhere; the test suite needs no database server |
 | Validation | `zod` | One schema per boundary |
 | Scheduling | Vercel Cron (2 daily jobs, free-tier limit) + an in-process sweep on API traffic + a GitHub Actions workflow for brute-force retries | Reminders go out without a second server |
@@ -53,9 +54,9 @@ boot, so a fresh Neon database becomes usable on the first `bun start`.
 
 ## Design system
 
-One theme drives both apps. It lives in `apps/mobile-shared/src/theme.ts`
+One theme drives the unified app. It lives in `apps/mobile-shared/src/theme.ts`
 (tokens) and `apps/mobile-shared/src/components.tsx` (the kit), and is copied
-into the customer and admin apps so they cannot drift apart.
+into the app so the three workspaces cannot drift apart.
 
 | Token | Meaning |
 |---|---|
@@ -68,7 +69,7 @@ into the customer and admin apps so they cannot drift apart.
 | `statusColors()` / `STATUS_LABEL` | Every appointment/payment status colour and label in one place |
 
 The kit is plain React over `StyleSheet` — no NativeWind, no Reanimated, no CSS
-runtime — so an Android build needs no NDK/CMake toolchain. Both apps use
+runtime — so an Android build needs no NDK/CMake toolchain. The unified app uses
 React Navigation 7 with a bottom tab bar over the same `Screen`,
 `GradientHeader`, `Card`, `Button`, `Field`, `Chip`, `Banner`, `Badge`, `Empty`,
 `Loading`, `StatTile` and `Avatar` primitives.
@@ -170,7 +171,7 @@ BOOTSTRAP_OWNER_PHONE=9812345678 bun run seed:bootstrap   # optional: BOOTSTRAP_
 ```
 
 Running it twice is safe: if a salon already exists it does nothing. The owner
-then signs in with OTP from the admin app and adds services, staff and branches.
+then signs in with OTP from the app's vendor workspace and adds services, staff and branches. A platform admin can also create the salon from the platform console.
 
 ---
 
@@ -190,57 +191,71 @@ then signs in with OTP from the admin app and adds services, staff and branches.
 | `bun run test:api` | Core suite (database, routes, journeys, integrations) |
 | `bun run test:next` | The Next.js deployment surface (parity, cron auth, path handling) |
 | `bun run test:smoke` | Just the end-to-end journeys |
-| `bun run mobile:sync` | Copy `apps/mobile-shared/src` into both React Native apps |
-| `bun run mobile:apks` | Build both release APKs into `artifacts/` |
-| `bun run mobile:install` | Install whichever APKs are built over USB (`adb`) |
-| `cd apps/mobile-customer && bun run test` | The app's jest smoke test: renders the whole app and unmounts it (same in `apps/mobile-admin`) |
-| `cd apps/mobile-customer && bunx tsc --noEmit` | Typecheck a native app, tests included (same in `apps/mobile-admin`) |
+| `bun run mobile:sync` | Copy `apps/mobile-shared/src` into the React Native apps |
+| `bun run mobile:apks` | Build the unified release APK into `artifacts/` |
+| `bun run mobile:install` | Install the built APK over USB (`adb`) |
+| `cd apps/mobile && bun run test` | The unified app's jest smoke test: renders the whole app and unmounts it |
+| `cd apps/mobile && bunx tsc --noEmit` | Typecheck the unified app, tests included |
 
-## Android apps — React Native, two icons, one API
+## Android app — React Native, one icon, one API
 
-The phones the salon actually uses run **native React Native apps** (the reference
-project's model), against the SalonPro API:
+The phones the salon actually uses run **one native React Native app** against
+the SalonPro API. After sign-in the server session decides which workspace
+opens:
 
-| App | Package | Source | Who uses it |
+| Workspace | Roles | What they see |
+|---|---|---|
+| **Client** | `customer` | Home, booking, visit history, wallet & offers, referrals, notifications |
+| **Vendor** | `salon_owner`, `branch_manager`, `receptionist`, `salon_staff` | Today/reports, schedule + status actions, customers, money/refunds, staff, services, offers, reminders, settings, audit — filtered by permission |
+| **Platform** | `super_admin` | Cross-salon overview, salons, vendors, audit, account |
+
+| App | Package | Source | Version |
 |---|---|---|---|
-| **SalonPro** | `com.salonpro.app` | `apps/mobile-customer/` | Customers: book, visit history, wallet & offers, referrals, notifications |
-| **SalonPro Admin** | `com.salonpro.admin` | `apps/mobile-admin/` | The salon: today's numbers, schedule + status actions, customers, money/refunds, staff, services, reports, reminders, settings, audit log |
+| **SalonPro (unified)** | `com.salonpro.app` | `apps/mobile/` | 2.0.0 |
+| Frozen reference | `com.salonpro.app` | `apps/mobile-customer/` | 1.0.5 |
+| Frozen reference | `com.salonpro.admin` | `apps/mobile-admin/` | 1.0.5 |
 
-Both are React Native 0.87 (Hermes, new architecture) with React Navigation 7,
+The app is React Native 0.87 (Hermes, new architecture) with React Navigation 7,
 AsyncStorage sessions, a shared theme and component kit, and hand-drawn charts —
 so an Android build needs **no NDK-level styling dependencies**. Screens are
 styled with plain `StyleSheet` against `apps/mobile-shared/src/theme.ts`: the same
 hot-magenta-over-cream SalonPro palette, with no NativeWind or Reanimated in the
 tree (they would pull in CMake/NDK work for no user-visible gain here).
 
-### One shared codebase, two apps
+The permission catalog is the contract: tabs and action controls are rendered
+from `user.permissions`, but every API route re-checks the permission and the
+salon scope on the server. A hidden button is not security.
 
-`apps/mobile-shared/src/` holds everything both apps use — theme, API client,
+### One shared codebase
+
+`apps/mobile-shared/src/` holds everything the app uses — theme, API client,
 endpoint map, types, auth provider, UI components, hooks, server-address card,
 the checkout helper and the in-app updater. `scripts/sync-mobile-shared.sh`
-**copies** it into each app's `src/shared/` (plus `packages/shared/src` →
+**copies** it into `apps/mobile/src/shared/` (plus `packages/shared/src` →
 `src/core/`), and every copied file carries a `GENERATED FILE` header. Edit the
 shared sources and re-run the script (also done automatically by the APK build);
 never edit the copies.
 
-### Build the APKs
+### Build the APK
 
 ```bash
-bash scripts/build-mobile-apks.sh              # both apps
-bash scripts/build-mobile-apks.sh customer     # just one
+bash scripts/build-mobile-apks.sh              # unified app (default)
+bash scripts/build-mobile-apks.sh legacy        # old customer + admin reference builds
 SALONPRO_API_BASE=https://salonpro.vercel.app bash scripts/build-mobile-apks.sh
 ```
 
 Each build syncs the shared sources, bakes the API address into `src/config.ts`
 when `SALONPRO_API_BASE` is set, copies the Material icon font into the APK and
-runs `./gradlew assembleRelease`. It also reads `versionName` from
+runs `./gradlew assembleRelease`. It reads `versionName` from
 `android/app/build.gradle` and uses it for the file name and the in-app version
 label. Output lands in `artifacts/`:
 
 ```
-artifacts/mobile-customer-1.0.4.apk      (com.salonpro.app)
-artifacts/mobile-admin-1.0.4.apk         (com.salonpro.admin)
+artifacts/mobile-customer-2.0.0.apk      (com.salonpro.app, unified)
 ```
+
+The `mobile-customer-` prefix is intentional for 2.0.0: installed 1.0.5 customer
+updaters look for that prefix. It is an asset name, not the app's identity.
 
 Prerequisites: **JDK 17**, the Android SDK (`platform-tools`, `platforms;android-36`,
 `build-tools;37.0.0`), and — because React Native's app module compiles a small
@@ -248,45 +263,50 @@ amount of C++ for the new architecture — **NDK 27.1.12297006** and **CMake 3.2
 (`sdkmanager "ndk;27.1.12297006" "cmake;3.22.1"`). A first release build takes
 roughly ten minutes; later ones are much faster.
 
-Signed with the standard **debug keystore** (the build script recreates it if a
-fresh clone is missing it), which is right for sideloading to your own phones and
-not for the Play Store.
+Signed with the same **debug keystore** as 1.0.4/1.0.5 (SHA-256
+`fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c`), which is
+right for sideloading to your own phones and not for the Play Store. The keystore
+is not committed; keep a local copy in `apps/mobile/android/app/debug.keystore`
+before building. Android refuses an update signed with a different key.
 
 Install over USB:
 
 ```bash
-bash scripts/install-apks.sh       # restarts adb, waits for authorization, installs both
-adb install -r artifacts/mobile-customer-1.0.4.apk
+bash scripts/install-apks.sh       # restarts adb, waits for authorization, installs the built APK
+adb install -r artifacts/mobile-customer-2.0.0.apk
 ```
+
+The old `com.salonpro.admin` app is retired. Android will not install a different
+package over it; admin users install the unified APK once manually, then sign in
+with the same phone.
 
 ### In-app updates — no more GitHub by hand
 
-From **1.0.4**, both apps check GitHub Releases when they start (and at most
-once every 10 minutes when returning to the foreground). If a newer build
-exists, a native Android dialog offers it, the APK downloads with an in-app
-progress bar, and Android's package installer opens. There is also a
-**Check for updates** row in **Profile → Shortcuts** (customer) and
-**More → This device** (admin).
+From **1.0.4**, the app checks GitHub Releases when it starts (and at most once
+every 10 minutes when returning to the foreground). If a newer build exists, a
+native Android dialog offers it, the APK downloads with an in-app progress bar,
+and Android's package installer opens. There is also a **Check for updates** row
+in the client Profile and in the vendor/platform **More/Account** screens.
 
 The first build that contains the updater — **1.0.4** — has to be installed once
 by hand. Every release after that can install from inside the app.
 
 **Publish an update:**
 
-1. Bump `versionCode` **and** `versionName` in the app's
-   `android/app/build.gradle` (and repeat if both apps changed).
+1. Bump `versionCode` **and** `versionName` in
+   `apps/mobile/android/app/build.gradle`.
 2. Build:
    ```bash
    SALONPRO_API_BASE=https://salonpro-rosy.vercel.app bash scripts/build-mobile-apks.sh
    ```
-   The script names the files after `versionName`:
-   `artifacts/mobile-customer-<version>.apk` and
-   `artifacts/mobile-admin-<version>.apk`.
-3. Create a GitHub release (for example tag `mobile-1.0.5`), upload those APKs
-   **with those exact file names**, and publish it — not a draft, not a
+   The script names the file after `versionName`:
+   `artifacts/mobile-customer-<version>.apk` (the legacy prefix is what installed
+   1.0.5 customer updaters search for).
+3. Create a GitHub release (for example tag `mobile-2.0.0`), upload the APK
+   **with that exact file name**, and publish it — not a draft, not a
    pre-release.
 4. Installed 1.0.4+ apps offer it on the next launch, on returning to the app,
-   or from the manual check.
+   or from the manual check. The 1.0.5 → 2.0.0 path is the first unified update.
 
 The updater picks the newest published release that has a matching asset,
 compares the version in the file name with the installed `versionName`, then
@@ -315,7 +335,7 @@ a **Server address** screen reachable from sign-in and from More → Server addr
 ### Money in the apps, honestly
 
 - **Wallet and pay-at-salon work today.** Wallet recharges can also be paid by
-  card/UPI: the customer app ships the Razorpay native SDK
+  card/UPI: the unified app ships the Razorpay native SDK
   (`react-native-razorpay`), so once the salon's keys are configured on the
   server the sheet opens in test mode and the server verifies the signature.
   With no keys the same flow runs against the server's signed simulation, and a
@@ -467,9 +487,10 @@ salonpro/
 │   │   ├── lib/reminders.ts  # staleness guard + stampede collapse for the sweep
 │   │   ├── test/parity.test.ts          # 13 tests: the deployed surface
 │   │   └── vercel.json       # 2 daily cron jobs (free tier)
-│   ├── mobile-shared/src/    # ONE source for both native apps (theme, api, endpoints, ui, auth)
-│   ├── mobile-customer/      # React Native app  → com.salonpro.app
-│   └── mobile-admin/         # React Native app  → com.salonpro.admin
+│   ├── mobile-shared/src/    # shared native source (theme, api, endpoints, ui, auth, updates)
+│   ├── mobile/               # unified app → com.salonpro.app (client + vendor + platform)
+│   ├── mobile-customer/      # frozen 1.0.5 reference build
+│   └── mobile-admin/         # frozen 1.0.5 reference build
 ├── packages/
 │   ├── core/                 # the whole server: routes, services, db, seed, auth
 │   │   ├── src/
@@ -479,11 +500,11 @@ salonpro/
 │   │   │   ├── db.ts         # driver (pg | PGlite), toPg() translation, schema, tx()
 │   │   │   ├── seed.ts       # demo seed (--reset) and live bootstrap
 │   │   │   └── routes/ + services/
-│   │   └── test/             # harness + 120 tests
+│   │   └── test/             # harness + 134 tests (including platform tenant tests)
 │   └── shared/               # types + money/time/format helpers (+ 9 tests)
 ├── scripts/
 │   ├── build-mobile-apks.sh  # sync shared code → gradle assembleRelease → artifacts/
-│   ├── sync-mobile-shared.sh # copy apps/mobile-shared into both apps
+│   ├── sync-mobile-shared.sh # copy apps/mobile-shared into the native apps
 │   ├── install-apks.sh       # adb install over USB
 │   ├── build-next.sh         # build the Next.js API
 │   └── serve.sh              # restart the server cleanly on :4000
@@ -504,17 +525,21 @@ salonpro/
   exist).
 - Loyalty/period boundaries use the process clock rather than a per-salon
   timezone library.
-- The Android APKs are **debug** builds signed with the debug keystore — fine for
-  sharing directly, but they cannot be published on the Play Store and Android
+- The Android APK is a **debug** build signed with the debug keystore — fine for
+  sharing directly, but it cannot be published on the Play Store and Android
   shows the usual "unknown sources" warnings.
-- Card/UPI checkout in the customer app now opens the real Razorpay sheet —
+- The 1.0.5 → 2.0.0 in-app update has not been exercised on a physical phone in
+  this workspace (`adb devices` was empty). The APK is built, signed with the
+  1.0.5 certificate and named for the 1.0.5 updater; the on-device confirmation
+  is still pending.
+- Card/UPI checkout in the client workspace opens the real Razorpay sheet —
   `react-native-razorpay` is installed and autolinked. It stays on the honest
-  simulated path until the salon's Razorpay keys are set on the server, and the
-  admin app deliberately has no payment sheet: it records money that arrived,
-  it does not take it.
+  simulated path until the salon's Razorpay keys are set on the server. The
+  vendor workspace deliberately has no payment sheet: it records money that
+  arrived, it does not take it.
 - **Push notifications** need a Firebase project and `google-services.json` placed
-  in the app; without it the admin app records that no device is registered rather
-  than claiming a push was delivered.
+  in the app; without it the vendor workspace records that no device is
+  registered rather than claiming a push was delivered.
 - Customer message templates still build a booking/referral link from
   `WEB_ORIGIN`. With the browser surface removed those URLs don't resolve yet —
   point `WEB_ORIGIN` at a future booking page or drop the links when a WhatsApp

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Build release APKs for the customer and admin apps.
+# Build release APKs for the unified SalonPro app (and, when asked, the legacy
+# customer/admin builds for reproducing an older release).
 #
-#   bash scripts/build-mobile-apks.sh            # both apps
-#   bash scripts/build-mobile-apks.sh customer    # just one
+#   bash scripts/build-mobile-apks.sh              # unified app (default)
+#   bash scripts/build-mobile-apks.sh legacy        # old customer + admin apps
+#   bash scripts/build-mobile-apks.sh customer      # old customer app only
+#   bash scripts/build-mobile-apks.sh admin         # old admin app only
 #   SALONPRO_API_BASE=https://salonpro.vercel.app bash scripts/build-mobile-apks.sh
 #
 # What it does, in order:
@@ -11,8 +14,8 @@
 #   3. makes sure the icon font ships in the APK
 #   4. runs `./gradlew assembleRelease` and copies the APK to artifacts/
 #
-# Signed with the debug keystore, which is what the reference project does: the
-# APKs are for testing and sideloading, not for the Play Store.
+# Signed with the same debug keystore as the published 1.0.4/1.0.5 builds, so
+# Android installs the update over the existing app and keeps local data.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,14 +24,17 @@ export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export PATH="$JAVA_HOME/bin:$PATH"
 
-TARGET="${1:-both}"
-WANT_CUSTOMER=1
-WANT_ADMIN=1
+TARGET="${1:-unified}"
+WANT_UNIFIED=0
+WANT_CUSTOMER=0
+WANT_ADMIN=0
 case "$TARGET" in
-  customer) WANT_ADMIN=0 ;;
-  admin) WANT_CUSTOMER=0 ;;
-  both) ;;
-  *) echo "usage: bash scripts/build-mobile-apks.sh [both|customer|admin]" >&2; exit 2 ;;
+  unified) WANT_UNIFIED=1 ;;
+  legacy) WANT_CUSTOMER=1; WANT_ADMIN=1 ;;
+  customer) WANT_CUSTOMER=1 ;;
+  admin) WANT_ADMIN=1 ;;
+  all) WANT_UNIFIED=1; WANT_CUSTOMER=1; WANT_ADMIN=1 ;;
+  *) echo "usage: bash scripts/build-mobile-apks.sh [unified|legacy|customer|admin|all]" >&2; exit 2 ;;
 esac
 
 BUILT=()
@@ -37,7 +43,7 @@ echo "── syncing shared sources"
 bash "$ROOT/scripts/sync-mobile-shared.sh"
 
 build_app() {
-  local app_dir="$1" label="$2"
+  local app_dir="$1" label="$2" slug_override="${3:-}"
 
   # The version in android/app/build.gradle is the single source of truth: it
   # becomes versionName (shown to Android), the APK's file name (which the
@@ -99,15 +105,20 @@ PY
 
   mkdir -p "$ROOT/artifacts"
   local slug out
-  slug="$(basename "$app_dir")"
+  slug="${slug_override:-$(basename "$app_dir")}"
   out="$ROOT/artifacts/${slug}-${version_name}.apk"
   cp "$apk" "$out"
   BUILT+=("$out")
   printf '✅ %s → %s (%s)\n' "$label" "$out" "$(du -h "$out" | cut -f1)"
 }
 
-if [ "$WANT_CUSTOMER" = 1 ]; then build_app "$ROOT/apps/mobile-customer" "customer app"; fi
-if [ "$WANT_ADMIN" = 1 ]; then build_app "$ROOT/apps/mobile-admin" "admin app"; fi
+if [ "$WANT_UNIFIED" = 1 ]; then
+  # Keep the `mobile-customer-` asset prefix for 2.0.0 so installed 1.0.5
+  # customer builds can discover the unified APK through their updater.
+  build_app "$ROOT/apps/mobile" "unified SalonPro app" "mobile-customer"
+fi
+if [ "$WANT_CUSTOMER" = 1 ]; then build_app "$ROOT/apps/mobile-customer" "legacy customer app"; fi
+if [ "$WANT_ADMIN" = 1 ]; then build_app "$ROOT/apps/mobile-admin" "legacy admin app"; fi
 
 echo
 echo "Built:"

@@ -14,7 +14,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHARED="$ROOT/apps/mobile-shared/src"
-APPS=("$ROOT/apps/mobile-customer" "$ROOT/apps/mobile-admin")
+APPS=("$ROOT/apps/mobile" "$ROOT/apps/mobile-customer" "$ROOT/apps/mobile-admin")
 
 if [ ! -d "$SHARED" ]; then
   echo "apps/mobile-shared/src is missing — nothing to sync." >&2

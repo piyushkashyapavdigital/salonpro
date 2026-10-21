@@ -385,8 +385,17 @@ CREATE TABLE IF NOT EXISTS salons (
   currency TEXT NOT NULL DEFAULT 'INR',
   ownerId TEXT NOT NULL,
   settings TEXT NOT NULL DEFAULT '{}',
-  createdAt TEXT NOT NULL
+  status TEXT NOT NULL DEFAULT 'active',
+  plan TEXT NOT NULL DEFAULT 'trial',
+  trialEndsAt TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT
 );
+ALTER TABLE salons ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE salons ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'trial';
+ALTER TABLE salons ADD COLUMN IF NOT EXISTS trialEndsAt TEXT;
+ALTER TABLE salons ADD COLUMN IF NOT EXISTS updatedAt TEXT;
+CREATE INDEX IF NOT EXISTS idx_salons_status ON salons(status);
 
 CREATE TABLE IF NOT EXISTS branches (
   id TEXT PRIMARY KEY,
@@ -800,7 +809,7 @@ CREATE TABLE IF NOT EXISTS app_meta (
  * Bump when `SCHEMA` changes. `ensureSchema()` compares it with what the
  * database reports and only then runs the migrations.
  */
-export const SCHEMA_VERSION = '1';
+export const SCHEMA_VERSION = '2';
 
 /**
  * Create the schema if this database has never seen it.
