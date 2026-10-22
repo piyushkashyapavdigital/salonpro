@@ -38,7 +38,7 @@ short-lived instances and the pooler multiplexes them.
    | `SESSION_SECRET` | from `deploy-secrets.local.txt` (rotating it signs everyone out) |
    | `CRON_SECRET` | from `deploy-secrets.local.txt` — the reminder endpoints answer 503 without it, by design |
    | `ALLOW_DEV_OTP` | *only for demos*: `true` makes the OTP visible on screen and the apps say no SMS was sent. Leave unset for real use (production then refuses rather than faking a code). |
-   | `DEV_LOGIN_PIN` | *only for demos*: the PIN for the developer sign-in that opens a seeded account (Platform / Salon owner / Client / Manager / Reception). **A production server has no default** — if this is unset, `/api/auth/dev-login` stays closed and the app hides its demo card. Set it to something private if you want the switcher on a hosted demo. |
+   | `DEV_LOGIN_PIN` | *only for demos*: the PIN for the developer sign-in that opens a seeded account (Platform / Salon owner / Client / Manager / Reception). Defaults to `1234` while `ALLOW_DEV_OTP` is on (a hosted demo); set it to something private to change it. With demo mode **off** the route is closed and the app hides its demo card. |
    | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET` | optional — test keys flip checkout from the simulated path to the real sheet; the webhook secret keeps verification server-side |
    | `OTP_PROVIDER_CONFIGURED` + your SMS/WhatsApp provider vars (see `.env.example`) | optional — a real OTP channel |
 

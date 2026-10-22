@@ -440,9 +440,11 @@ app never picks it by itself — and the session still goes through the normal
 permission checks.
 
 The card only appears when the server says developer sign-in is available
-(`GET /api/auth/dev-mode` returns a boolean and never the PIN). A production
-server has **no default PIN**: `DEV_LOGIN_PIN` must be set explicitly there, and
-without it the route stays closed.
+(`GET /api/auth/dev-mode` returns a boolean and never the PIN). The default PIN
+is `1234` on a development server **and on a hosted demo** (a deployment with
+`ALLOW_DEV_OTP=true`, where the one-time code is shown on screen anyway) — set
+`DEV_LOGIN_PIN` to choose another. A **real** deployment (demo mode off) has no
+developer sign-in at all: the route is closed and the card never appears.
 
 | Role | Phone |
 |---|---|

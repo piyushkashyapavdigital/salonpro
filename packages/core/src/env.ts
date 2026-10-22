@@ -46,6 +46,12 @@ function bool(key: string, fallback: boolean): boolean {
 }
 
 const NODE_ENV = str('NODE_ENV', 'development');
+/**
+ * Demo mode. With it on, the server shows one-time codes on screen instead of
+ * sending them, and the developer PIN works too — that is what makes a hosted
+ * demo usable. With it off the server refuses both.
+ */
+const ALLOW_DEV_OTP = bool('ALLOW_DEV_OTP', false);
 
 export const env = {
   nodeEnv: NODE_ENV,
@@ -104,17 +110,18 @@ export const env = {
    * explicit acknowledgement, never a default: without it, a production server
    * refuses to issue a code it cannot actually send (503), exactly as before.
    */
-  allowDevOtp: bool('ALLOW_DEV_OTP', false),
+  allowDevOtp: ALLOW_DEV_OTP,
 
   /**
    * PIN for the demo-only developer sign-in (`POST /api/auth/dev-login`).
    *
-   * On a development server the PIN defaults to 1234 so the demo flow works
-   * out of the box. On a production server there is no default: the PIN has to
-   * be set explicitly, so a deployed instance can never be opened with a PIN
-   * that is printed in a README. It also only works while `allowDevOtp` is on.
+   * A development server and a hosted **demo** (one with `ALLOW_DEV_OTP` on —
+   * the mode where the one-time code is shown on screen anyway) use the
+   * documented default `1234`; set `DEV_LOGIN_PIN` to choose another. A real
+   * deployment — demo mode off — gets no default at all, and the route is
+   * closed there regardless.
    */
-  devLoginPin: str('DEV_LOGIN_PIN', '') || (NODE_ENV === 'production' ? '' : '1234'),
+  devLoginPin: str('DEV_LOGIN_PIN', '') || (ALLOW_DEV_OTP || NODE_ENV !== 'production' ? '1234' : ''),
 
   /**
    * Postgres pool size. Serverless platforms run many short-lived instances per

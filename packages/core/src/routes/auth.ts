@@ -237,8 +237,8 @@ authRouter.post(
       throw forbidden('Developer sign-in is switched off on this server. Use the one-time code instead.');
     }
     if (!env.devLoginPin) {
-      /* A production server has no default PIN: it must be set explicitly in
-       * the environment, otherwise this route stays closed. */
+      /* A real deployment (demo mode off) has no default PIN and the route
+       * stays closed. A demo server always has one — see `env.devLoginPin`. */
       throw forbidden('Developer sign-in is not configured on this server.');
     }
     await assertUnderRateLimit('devpin', 'dev_login', 20, 15);
