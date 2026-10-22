@@ -241,7 +241,12 @@ authRouter.post(
        * stays closed. A demo server always has one — see `env.devLoginPin`. */
       throw forbidden('Developer sign-in is not configured on this server.');
     }
-    await assertUnderRateLimit('devpin', 'dev_login', 20, 15);
+    /* Per caller, so one tester hammering the switcher cannot lock everybody
+     * else out of a shared demo, plus a wide global ceiling against a spray. */
+    const ip = clientIp(req);
+    await assertUnderRateLimit(`devpin:${ip}`, 'dev_login', 30, 15);
+    await assertUnderRateLimit('devpin', 'dev_login', 400, 15);
+    await recordAttempt(`devpin:${ip}`, 'dev_login');
     await recordAttempt('devpin', 'dev_login');
     if (body.pin !== env.devLoginPin) {
       throw unauthorized('That developer PIN is not correct.');
