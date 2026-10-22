@@ -254,11 +254,26 @@ authRouter.post(
       user = (await one('SELECT id, name, role, status FROM users WHERE phone = ?', phone)) ?? null;
       if (!user) throw notFound('No account uses that number yet. Add the person with the one-time code first.');
     } else if (body.role) {
-      user =
-        (await one(
-          "SELECT id, name, role, status FROM users WHERE role = ? AND status <> 'deactivated' ORDER BY isDemo DESC, createdAt LIMIT 1",
-          body.role,
-        )) ?? null;
+      if (body.role === 'customer') {
+        /* The demo client should be one that actually visited, so the
+         * "review this visit" flow has a completed visit to point at. */
+        user =
+          (await one(
+            `SELECT u.id, u.name, u.role, u.status
+               FROM users u
+              WHERE u.role = 'customer' AND u.status <> 'deactivated'
+              ORDER BY (SELECT MAX(sr.completedAt) FROM service_records sr WHERE sr.customerId = u.id) DESC NULLS LAST,
+                       u.isDemo DESC,
+                       u.createdAt
+              LIMIT 1`,
+          )) ?? null;
+      } else {
+        user =
+          (await one(
+            "SELECT id, name, role, status FROM users WHERE role = ? AND status <> 'deactivated' ORDER BY isDemo DESC, createdAt LIMIT 1",
+            body.role,
+          )) ?? null;
+      }
       if (!user) throw notFound(`No ${body.role.replace(/_/g, ' ')} demo account exists on this server yet.`);
     } else {
       user =
