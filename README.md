@@ -2,9 +2,10 @@
 
 A salon platform with **one API** and **one React Native app** that opens three
 role-based workspaces: platform admin → salon vendors (owner, manager, reception,
-stylist) → clients. A playful, high-contrast interface — hot-magenta over warm
-cream, candy accents, rounded white cards, bottom tab navigation — shipped as one
-installable APK that talks to one Next.js API.
+stylist) → clients. A calm, editorial interface — evergreen over warm ivory with
+one terracotta spark, serif display headings, rounded white cards and a bottom
+bar that never leaves the screen — shipped as one installable APK that talks to
+one Next.js API.
 
 > **Honesty first.** This deployment runs Razorpay in **simulated** mode and OTP
 > in **development mock** mode until real keys are provided. When nothing is
@@ -60,19 +61,40 @@ into the app so the three workspaces cannot drift apart.
 
 | Token | Meaning |
 |---|---|
-| `colors.brand*` | Hot-magenta accent (`#FF2E88` core) — primary buttons, active tabs, badges, charts |
-| `colors.canvas` / `colors.ink*` | The warm-cream app canvas (`#FFF7F2`) over warm plum-ink neutrals — `ink100` the hairline border, `300`–`500` muted text, `700`–`950` headings and numbers |
+| `colors.brand*` | Evergreen accent (`#0F6B57` core, `#0B3B34` deep) — primary buttons, the active tab, headers, badges, charts |
+| `colors.canvas` / `colors.ink*` | The warm-ivory app canvas (`#F7F3EC`) over warm stone neutrals — `ink100` the hairline border, `300`–`500` muted text, `700`–`950` headings and numbers |
 | `colors.mint` / `amber` / `rose` / `sky` | Success / warning / danger / info |
-| `colors.lilac` / `coral` / `lemon` / `grape` / `accents` | The candy accents that give cards and quick actions some colour |
-| `gradients` | Hero gradients — `header` is violet→magenta (the home/overview hero), `primary` the button fill |
-| `space()`, `radius`, `font`, `shadow` | One spacing scale, generous rounded-card radii, the soft plum-tinted card shadow |
+| `colors.lilac` / `coral` / `lemon` / `grape` / `accents` | Muted natural accents that give cards and quick actions some colour |
+| `gradients` | Hero gradients — `header` is deep evergreen→evergreen (the home/overview hero), `primary` the button fill |
+| `space()`, `radius`, `font`, `shadow` | One spacing scale, generous rounded-card radii, the soft evergreen-tinted card shadow |
+| `font.family.display` | A serif display face for headings and sheet titles — the boutique-salon signature; body copy stays on the platform sans-serif |
+| `motion` | Shared timings (fast / base / slow) and the spring used by every press, sheet and header orb |
 | `statusColors()` / `STATUS_LABEL` | Every appointment/payment status colour and label in one place |
 
 The kit is plain React over `StyleSheet` — no NativeWind, no Reanimated, no CSS
-runtime — so an Android build needs no NDK/CMake toolchain. The unified app uses
-React Navigation 7 with a bottom tab bar over the same `Screen`,
+runtime — so an Android build needs no NDK/CMake toolchain. Motion comes from
+React Native's own `Animated` (spring entrances, press scaling, floating header
+orbs, the sheet slide-up) so nothing extra is bundled. The unified app uses
+React Navigation 7 with a **global bottom bar** over the same `Screen`,
 `GradientHeader`, `Card`, `Button`, `Field`, `Chip`, `Banner`, `Badge`, `Empty`,
-`Loading`, `StatTile` and `Avatar` primitives.
+`Loading`, `StatTile`, `Avatar`, `BrandMark` and `AppSheet` primitives.
+
+### One bottom bar, every screen
+
+The bar is rendered by each stack's `layout`, not by the tab navigator, so it is
+still there on a pushed detail, a settings page or a full-screen form, and it
+highlights the tab that screen belongs to. Tapping a destination returns to the
+tab shell and switches tabs. The nested tab navigator reports the active tab
+through a small context, so the highlight never drifts.
+
+### No native Android dialogs
+
+`Alert.alert` is a system window with the platform's shape and colours. Every
+dialog SalonPro owns — the updater (update available, permission, error,
+progress), sign out, cancel a visit, wallet terms, coupon and referral codes,
+delete-data — is a SalonPro `AppSheet` with the monogram, the serif title and
+the app's own motion. (Android's package-installer confirmation is still the
+system's: replacing it needs device-owner privileges.)
 
 Every screen sits inside an error boundary, so a crash shows a readable card
 with a reload button instead of a blank white screen.
@@ -211,7 +233,7 @@ opens:
 
 | App | Package | Source | Version |
 |---|---|---|---|
-| **SalonPro (unified)** | `com.salonpro.app` | `apps/mobile/` | 2.0.2 |
+| **SalonPro (unified)** | `com.salonpro.app` | `apps/mobile/` | 2.1.0 |
 | Frozen reference | `com.salonpro.app` | `apps/mobile-customer/` | 1.0.5 |
 | Frozen reference | `com.salonpro.admin` | `apps/mobile-admin/` | 1.0.5 |
 
@@ -219,8 +241,9 @@ The app is React Native 0.87 (Hermes, new architecture) with React Navigation 7,
 AsyncStorage sessions, a shared theme and component kit, and hand-drawn charts —
 so an Android build needs **no NDK-level styling dependencies**. Screens are
 styled with plain `StyleSheet` against `apps/mobile-shared/src/theme.ts`: the same
-hot-magenta-over-cream SalonPro palette, with no NativeWind or Reanimated in the
-tree (they would pull in CMake/NDK work for no user-visible gain here).
+evergreen-over-ivory SalonPro palette, with no NativeWind or Reanimated in the
+tree (they would pull in CMake/NDK work for no user-visible gain here). Motion
+uses React Native's own `Animated`.
 
 The permission catalog is the contract: tabs and action controls are rendered
 from `user.permissions`, but every API route re-checks the permission and the
@@ -251,7 +274,7 @@ runs `./gradlew assembleRelease`. It reads `versionName` from
 label. Output lands in `artifacts/`:
 
 ```
-artifacts/mobile-customer-2.0.2.apk      (com.salonpro.app, unified)
+artifacts/mobile-customer-2.1.0.apk      (com.salonpro.app, unified)
 ```
 
 The `mobile-customer-` prefix is intentional since 2.0.0: installed 1.0.5
@@ -274,7 +297,7 @@ Install over USB:
 
 ```bash
 bash scripts/install-apks.sh       # restarts adb, waits for authorization, installs the built APK
-adb install -r artifacts/mobile-customer-2.0.2.apk
+adb install -r artifacts/mobile-customer-2.1.0.apk
 ```
 
 The old `com.salonpro.admin` app is retired. Android will not install a different
@@ -285,9 +308,11 @@ with the same phone.
 
 From **1.0.4**, the app checks GitHub Releases when it starts (and at most once
 every 10 minutes when returning to the foreground). If a newer build exists, a
-native Android dialog offers it, the APK downloads with an in-app progress bar,
-and Android's package installer opens. There is also a **Check for updates** row
-in the client Profile and in the vendor/platform **More/Account** screens.
+**SalonPro sheet** offers it — monogram, version, download size, release notes —
+the APK downloads with an in-app progress bar, and Android's package installer
+opens. There is also a **Check for updates** row in the client Profile and in the
+vendor/platform **More/Account** screens. Nothing here uses a native Android
+dialog; only the installer confirmation at the very end is the system's.
 
 The first build that contains the updater — **1.0.4** — has to be installed once
 by hand. Every release after that can install from inside the app.
@@ -303,13 +328,13 @@ by hand. Every release after that can install from inside the app.
    The script names the file after `versionName`:
    `artifacts/mobile-customer-<version>.apk` (the legacy prefix is what installed
    1.0.5 customer updaters search for).
-3. Create a GitHub release (for example tag `mobile-2.0.2`), upload the APK
+3. Create a GitHub release (for example tag `mobile-2.1.0`), upload the APK
    **with that exact file name**, and publish it — not a draft, not a
    pre-release.
 4. Installed 1.0.4+ apps offer it on the next launch, on returning to the app,
    or from the manual check. The 1.0.5 → 2.0.0 path is the first unified update;
-   the 2.0.0 → 2.0.1 and 2.0.1 → 2.0.2 paths were exercised on an Android
-   emulator.
+   the 2.0.0 → 2.0.1, 2.0.1 → 2.0.2 and 2.0.2 → 2.1.0 paths were exercised on
+   an Android emulator.
 
 The updater picks the newest published release that has a matching asset,
 compares the version in the file name with the installed `versionName`, then
@@ -375,6 +400,26 @@ Every rating is stored in `salon_reviews`; `googleRedirected` is true only for a
 `GET/POST /api/public/reviews/:salonId` and the owner API is
 `GET /api/admin/reviews`.
 
+#### Reviews are attached to the visit, not to a form
+
+Nobody types their name or phone number into a review page again.
+
+* A signed-in customer gets a short-lived, signed **review token** for one
+  completed visit: `POST /api/customer/reviews/link` (the app calls it from the
+  visit screen and opens `/r/<salonId>?t=<token>`).
+* The hosted page exchanges that token on the server, shows
+  “Reviewing as <name>” and submits the rating with the customer's id and the
+  visit's id attached. The token is verified against the session's own completed
+  service record, so it cannot be minted for someone else's visit, and a second
+  review of the same visit is refused (409).
+* The vendor **Reviews** screen marks such a review **Verified visit** and shows
+  who wrote it. Reviews are readable by the salon team (owner, manager) and by
+  nobody else — customers never see another customer's feedback, and the hosted
+  page never lists reviews.
+* A shared link without a token still works and is stored as anonymous
+  feedback: the salon gets the rating, the customer is not asked for details
+  that are already on file.
+
 > **Policy note:** routing only happy customers to Google is commonly called
 > “review gating”, and Google's review policies may prohibit it. Confirm the
 > policy for your market before running this funnel at scale.
@@ -384,6 +429,20 @@ Every rating is stored in `salon_reviews`; `googleRedirected` is true only for a
 Password for all demo logins: **`salonpro123`**. Demo users are seeded with
 `isDemo = 1` and excluded from production reporting. Demo login endpoints are
 refused when `NODE_ENV=production`.
+
+### The developer PIN switcher
+
+On a **development** server the sign-in screen shows a **Demo access** card: type
+the developer PIN (default `1234`, or tap *Use 1234*) and then tap
+**Platform**, **Salon owner**, **Client**, **Manager** or **Reception** to open
+the first seeded account in that workspace. The server resolves the role — the
+app never picks it by itself — and the session still goes through the normal
+permission checks.
+
+The card only appears when the server says developer sign-in is available
+(`GET /api/auth/dev-mode` returns a boolean and never the PIN). A production
+server has **no default PIN**: `DEV_LOGIN_PIN` must be set explicitly there, and
+without it the route stays closed.
 
 | Role | Phone |
 |---|---|
@@ -508,6 +567,16 @@ production deployment on a managed Postgres. See `REVIEW.md` §10.
 
 ---
 
+## Release notes
+
+- `docs/RELEASE-2.1.0.md` — evergreen redesign, global bottom bar,
+  session-linked reviews, custom updater sheet, developer workspace switcher.
+- `docs/RELEASE-2.0.0.md` — one app, three workspaces.
+- `docs/UNIFIED-APP.md` — how the single APK and the three workspaces fit
+  together.
+
+---
+
 ## Project layout
 
 ```
@@ -575,10 +644,20 @@ salonpro/
   `WEB_ORIGIN`. With the browser surface removed those URLs don't resolve yet —
   point `WEB_ORIGIN` at a future booking page or drop the links when a WhatsApp
   provider is connected (nothing is sent today without one).
-- The hosted deployment (`apps/next` → Vercel) still needs **your** Vercel login.
-  Step-by-step walkthrough: **`DEPLOY.md`** (import the repo, Root Directory
-  `apps/next`, three env vars — then `SALONPRO_API_BASE` can be rebuilt into the
-  APKs, or set once in the app's server screen).
+- The hosted deployment (`apps/next` → Vercel) is live at
+  `https://salonpro-rosy.vercel.app` (deployed from `main` through the Vercel
+  GitHub integration). Step-by-step walkthrough: **`DEPLOY.md`**.
+- **Google reviews on the deployed salon are still off** until the owner
+  connects the salon's real Google Place ID (**More → Settings → Google
+  reviews**). Until then a 4–5★ rating is stored but no Google hand-off is
+  offered — the server decides that, not the browser.
+- The in-app updater's *last* step is Android's own package-installer
+  confirmation. Replacing that needs device-owner provisioning, so it stays
+  system UI; the prompt, the notes, the permission explanation and the progress
+  are all SalonPro's own.
+- A few less-used vendor screens (appointments, refunds, reminders, staff
+  attendance, role changes) still open Android's native `Alert` dialog. The
+  shared `AppSheet` exists and is used everywhere else.
 - The API is reachable wherever you host it; on a LAN the phones must be on the
   same Wi-Fi, and the apps' Server address screen is the fix when they are not.
 

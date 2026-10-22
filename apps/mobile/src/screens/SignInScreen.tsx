@@ -6,7 +6,7 @@
  * shortcut asks the server for the first seeded account in that workspace, so
  * testing admin → vendor → client never means juggling phone numbers.
  */
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -93,6 +93,23 @@ export function SignInScreen() {
   const [showServer, setShowServer] = useState(false);
   const [pin, setPin] = useState('');
   const [pinBusyRole, setPinBusyRole] = useState<DevLoginRole | null>(null);
+  /** Null until the server answers: the demo card is hidden either way. */
+  const [devMode, setDevMode] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    auth
+      .devMode()
+      .then((res) => {
+        if (!cancelled) setDevMode(Boolean(res.enabled));
+      })
+      .catch(() => {
+        if (!cancelled) setDevMode(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const cleanPhone = phone.replace(/\D/g, '').slice(-10);
   const scrollRef = useRef<React.ElementRef<typeof ScrollView>>(null);
@@ -288,6 +305,7 @@ export function SignInScreen() {
             )}
           </Card>
 
+          {devMode ? (
           <Card style={styles.demoCard}>
             <View style={styles.devHead}>
               <View style={styles.devIcon}>
@@ -345,6 +363,7 @@ export function SignInScreen() {
               The PIN opens the first seeded account for that workspace. A real server turns developer sign-in off.
             </Text>
           </Card>
+          ) : null}
 
           <Card>
             <Pressable onPress={() => setShowServer((value) => !value)} style={styles.serverToggle}>

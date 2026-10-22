@@ -182,6 +182,28 @@ authRouter.post(
 );
 
 /**
+ * Is developer sign-in available on this server?
+ *
+ * The app asks before it shows the demo workspace shortcuts, so a production
+ * install never puts a "sign in as the salon owner" card in front of a real
+ * customer. The answer is a boolean on purpose: the PIN is never sent out.
+ */
+authRouter.get(
+  '/dev-mode',
+  handler(async (_req, res) => {
+    const production = env.nodeEnv === 'production';
+    const enabled = Boolean(env.devLoginPin) && (!production || env.allowDevOtp);
+    res.setHeader('cache-control', 'no-store');
+    res.json({
+      enabled,
+      note: enabled
+        ? 'DEV MODE — developer sign-in is available on this server.'
+        : 'Developer sign-in is switched off on this server.',
+    });
+  }),
+);
+
+/**
  * Development-only PIN sign-in.
  *
  * Switched on only on a development/test server, or a production server that
@@ -213,6 +235,11 @@ authRouter.post(
      */
     if (env.nodeEnv === 'production' && !env.allowDevOtp) {
       throw forbidden('Developer sign-in is switched off on this server. Use the one-time code instead.');
+    }
+    if (!env.devLoginPin) {
+      /* A production server has no default PIN: it must be set explicitly in
+       * the environment, otherwise this route stays closed. */
+      throw forbidden('Developer sign-in is not configured on this server.');
     }
     await assertUnderRateLimit('devpin', 'dev_login', 20, 15);
     await recordAttempt('devpin', 'dev_login');

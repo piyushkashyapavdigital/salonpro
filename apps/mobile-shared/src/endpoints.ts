@@ -48,6 +48,7 @@ import type {
   RechargeOffersResponse,
   ReviewLinkResponse,
   DevLoginRole,
+  DevModeResponse,
   ReferralsResponse,
   Referral,
   ReferralInfoResponse,
@@ -95,6 +96,12 @@ export const auth = {
    */
   devLogin: (body: { pin: string; phone?: string; role?: DevLoginRole }) =>
     api<SessionResponse>('/auth/dev-login', { method: 'POST', body, anonymous: true }),
+
+  /**
+   * Ask the server whether developer sign-in is switched on there. The app
+   * only shows the demo workspace shortcuts when it is.
+   */
+  devMode: () => api<DevModeResponse>('/auth/dev-mode', { anonymous: true }),
 
   invite: (body: { name: string; phone: string; role: string; branchId?: string; email?: string }) =>
     api<{ ok: true; inviteToken?: string; message?: string }>('/auth/invite', { method: 'POST', body }),

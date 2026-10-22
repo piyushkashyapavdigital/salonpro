@@ -189,6 +189,12 @@ export interface ReviewLinkResponse {
 /** Seeded accounts the developer PIN can open directly on a demo server. */
 export type DevLoginRole = 'super_admin' | 'salon_owner' | 'branch_manager' | 'receptionist' | 'customer';
 
+/** Whether the server this app points at allows developer sign-in at all. */
+export interface DevModeResponse {
+  enabled: boolean;
+  note?: string;
+}
+
 export interface BookingResponse {
   appointment: Appointment;
   paymentPreference: 'wallet' | 'online' | 'pay_at_salon';

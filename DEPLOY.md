@@ -38,6 +38,7 @@ short-lived instances and the pooler multiplexes them.
    | `SESSION_SECRET` | from `deploy-secrets.local.txt` (rotating it signs everyone out) |
    | `CRON_SECRET` | from `deploy-secrets.local.txt` — the reminder endpoints answer 503 without it, by design |
    | `ALLOW_DEV_OTP` | *only for demos*: `true` makes the OTP visible on screen and the apps say no SMS was sent. Leave unset for real use (production then refuses rather than faking a code). |
+   | `DEV_LOGIN_PIN` | *only for demos*: the PIN for the developer sign-in that opens a seeded account (Platform / Salon owner / Client / Manager / Reception). **A production server has no default** — if this is unset, `/api/auth/dev-login` stays closed and the app hides its demo card. Set it to something private if you want the switcher on a hosted demo. |
    | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET` | optional — test keys flip checkout from the simulated path to the real sheet; the webhook secret keeps verification server-side |
    | `OTP_PROVIDER_CONFIGURED` + your SMS/WhatsApp provider vars (see `.env.example`) | optional — a real OTP channel |
 
@@ -63,7 +64,12 @@ provider configured you will see `otpDelivery:false`, `razorpay:false`, `push:fa
 ## 5. Connect Google reviews
 
 The first request after deploy runs the schema migration that adds
-`salon_reviews` automatically. Then, in the app:
+`salon_reviews` automatically. The current schema version is **4**: the table
+also carries `customerId` and `appointmentId`, so a review can be attached to
+the customer and the visit it came from (the customer app asks the API for a
+short-lived review token for a completed visit; the hosted page then shows
+“Reviewing as …” and no name or phone is ever typed again). One review per
+visit is enforced by a unique index on `appointmentId`. Then, in the app:
 
 1. Sign in as the salon owner → **More → Settings → Google reviews**.
 2. Paste the salon's Google **Place ID** (or a Google Maps URL containing

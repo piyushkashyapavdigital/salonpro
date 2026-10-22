@@ -84,6 +84,17 @@ test('dev PIN sign-in opens the app as the salon owner and says no OTP was used'
   assert.match(res.data.notice, /no otp was used/i);
 });
 
+test('the dev-mode probe tells the app whether developer sign-in exists, and never leaks the PIN', async () => {
+  const res = await h.get<{ enabled: boolean; note?: string }>('/auth/dev-mode');
+  assert.equal(res.status, 200);
+  assert.equal(res.data.enabled, true, 'a development server allows developer sign-in');
+  assert.equal(
+    JSON.stringify(res.data).includes('1234'),
+    false,
+    'the PIN is never sent to the app',
+  );
+});
+
 test('dev PIN sign-in can open a seeded account for a chosen workspace', async () => {
   const customer = await h.post<{ token: string; user: { role: string } }>('/auth/dev-login', {
     pin: '1234',

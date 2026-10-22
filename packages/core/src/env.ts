@@ -45,8 +45,10 @@ function bool(key: string, fallback: boolean): boolean {
   return ['1', 'true', 'yes', 'on'].includes(v.toLowerCase());
 }
 
+const NODE_ENV = str('NODE_ENV', 'development');
+
 export const env = {
-  nodeEnv: str('NODE_ENV', 'development'),
+  nodeEnv: NODE_ENV,
   port: num('PORT', 4000),
   repoRoot: REPO_ROOT,
   /**
@@ -105,10 +107,14 @@ export const env = {
   allowDevOtp: bool('ALLOW_DEV_OTP', false),
 
   /**
-   * PIN for the demo-only developer sign-in (`POST /api/auth/dev-login`). It only
-   * works while `allowDevOtp` is on, so a real deployment can never use it.
+   * PIN for the demo-only developer sign-in (`POST /api/auth/dev-login`).
+   *
+   * On a development server the PIN defaults to 1234 so the demo flow works
+   * out of the box. On a production server there is no default: the PIN has to
+   * be set explicitly, so a deployed instance can never be opened with a PIN
+   * that is printed in a README. It also only works while `allowDevOtp` is on.
    */
-  devLoginPin: str('DEV_LOGIN_PIN', '1234'),
+  devLoginPin: str('DEV_LOGIN_PIN', '') || (NODE_ENV === 'production' ? '' : '1234'),
 
   /**
    * Postgres pool size. Serverless platforms run many short-lived instances per
