@@ -1,11 +1,11 @@
 /**
- * The UI kit: plain React Native components styled from `theme.ts`.
+ * The SalonPro UI kit — plain React Native, styled from `theme.ts`.
  *
- * Deliberately dependency-light (no CSS runtime, no animation library) so the
- * Android build needs nothing beyond the JDK and the SDK, and so both apps look
- * identical.
+ * The rules: paper surfaces, 1px lines, no decorative gradients, a serif for
+ * display type and small wide capitals for labels. Motion is native-driver
+ * only, so a mid-range Android phone on the shop floor stays smooth.
  */
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -18,6 +18,7 @@ import {
   Text,
   TextInput,
   View,
+  type LayoutChangeEvent,
   type RefreshControlProps,
   type StyleProp,
   type TextInputProps,
@@ -26,7 +27,7 @@ import {
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, font, gradients, motion, radius, shadow, space } from './theme';
+import { colors, font, gradients, label as labelStyle, motion, radius, shadow, space } from './theme';
 
 /* ------------------------------------------------------------------ */
 /* Motion helpers                                                      */
@@ -41,60 +42,6 @@ function useScalePress(to = 0.97) {
     Animated.spring(scale, { toValue: 1, useNativeDriver: true, ...motion.spring }).start();
   };
   return { scale, pressIn, pressOut };
-}
-
-/**
- * A slow, barely-there float for the coloured orbs in headers. It is decorative
- * only, uses the native driver, and stops as soon as the header unmounts.
- */
-function FloatingBlob({
-  style,
-  delay = 0,
-  distance = 12,
-  duration = 4200,
-}: {
-  style: StyleProp<ViewStyle>;
-  delay?: number;
-  distance?: number;
-  duration?: number;
-}) {
-  const progress = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(progress, {
-          toValue: 1,
-          duration,
-          delay,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(progress, {
-          toValue: 0,
-          duration,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [delay, duration, progress]);
-
-  return (
-    <Animated.View
-      style={[
-        style,
-        {
-          transform: [
-            { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [0, -distance] }) },
-            { translateX: progress.interpolate({ inputRange: [0, 1], outputRange: [0, distance * 0.45] }) },
-          ],
-        },
-      ]}
-    />
-  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -123,7 +70,7 @@ export function Screen({
   useEffect(() => {
     Animated.timing(entrance, {
       toValue: 1,
-      duration: motion.base,
+      duration: motion.slow,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
@@ -131,7 +78,7 @@ export function Screen({
 
   const body = scroll ? (
     <ScrollView
-      contentContainerStyle={[padded && styles.scrollPad, { paddingBottom: space(10) }]}
+      contentContainerStyle={[padded && styles.scrollPad, { paddingBottom: space(14) }]}
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
       refreshControl={refresh}
@@ -150,9 +97,7 @@ export function Screen({
           styles.flex,
           {
             opacity: entrance,
-            transform: [
-              { translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) },
-            ],
+            transform: [{ translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }],
           },
         ]}
       >
@@ -163,6 +108,11 @@ export function Screen({
   );
 }
 
+/**
+ * The ink poster at the top of a workspace screen: a wide serif title, a
+ * letter-spaced caption, a hairline clay rule and a single oversized asterisk.
+ * The old version used coloured orbs; this one is built from type and rules.
+ */
 export function GradientHeader({
   title,
   subtitle,
@@ -177,12 +127,23 @@ export function GradientHeader({
   children?: React.ReactNode;
 }) {
   return (
-    <LinearGradient colors={gradient as unknown as string[]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
-      <FloatingBlob style={styles.headerBlob1} distance={14} duration={4600} />
-      <FloatingBlob style={styles.headerBlob2} delay={900} distance={10} duration={5200} />
-      <FloatingBlob style={styles.headerBlob3} delay={1600} distance={16} duration={6200} />
+    <LinearGradient
+      colors={gradient as unknown as string[]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.header}
+    >
+      <View style={styles.headerRing} />
+      <View style={styles.headerDot} />
+      <Text style={styles.headerAsterisk} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        ✳
+      </Text>
       <View style={styles.headerTop}>
         <View style={styles.flex}>
+          <View style={styles.headerKickerRow}>
+            <View style={styles.headerRule} />
+            <Text style={styles.headerKicker}>SalonPro</Text>
+          </View>
           <Text style={styles.headerTitle}>{title}</Text>
           {subtitle ? <Text style={styles.headerSubtitle}>{subtitle}</Text> : null}
         </View>
@@ -194,43 +155,31 @@ export function GradientHeader({
 }
 
 /**
- * The SalonPro monogram. It is drawn from Views so it stays crisp at every
- * size and can be reused in the sign-in hero, the updater and empty states.
+ * The SalonPro monogram. Drawn from Views, crisp at any size: an ink tile, a
+ * serif S and one vermilion dot — the whole identity in three shapes.
  */
 export function BrandMark({ size = 52 }: { size?: number }) {
-  const dot = Math.max(5, Math.round(size * 0.12));
+  const dot = Math.max(4, Math.round(size * 0.1));
   return (
-    <LinearGradient
-      colors={gradients.header as unknown as string[]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
+    <View
       style={{
         width: size,
         height: size,
-        borderRadius: size * 0.3,
+        borderRadius: size * 0.26,
+        backgroundColor: colors.ink900,
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',
       }}
     >
-      <View
-        style={{
-          position: 'absolute',
-          width: size * 0.7,
-          height: size * 0.7,
-          borderRadius: size * 0.35,
-          borderWidth: 1,
-          borderColor: 'rgba(217, 179, 130, 0.55)',
-        }}
-      />
       <Text
         style={{
           fontFamily: font.family.display,
-          fontSize: size * 0.58,
-          lineHeight: size * 0.64,
-          fontWeight: font.weight.bold,
-          color: colors.canvas,
-          marginTop: -size * 0.03,
+          fontSize: size * 0.64,
+          lineHeight: size * 0.72,
+          fontWeight: font.weight.regular,
+          color: colors.paper,
+          marginTop: -size * 0.02,
         }}
       >
         S
@@ -238,17 +187,15 @@ export function BrandMark({ size = 52 }: { size?: number }) {
       <View
         style={{
           position: 'absolute',
-          top: size * 0.16,
-          right: size * 0.16,
+          top: size * 0.17,
+          right: size * 0.17,
           width: dot,
           height: dot,
           borderRadius: dot / 2,
-          backgroundColor: colors.coral,
-          borderWidth: 1,
-          borderColor: 'rgba(255,255,255,0.35)',
+          backgroundColor: colors.clay,
         }}
       />
-    </LinearGradient>
+    </View>
   );
 }
 
@@ -275,12 +222,7 @@ export function Card({
   );
   if (!onPress) return content;
   return (
-    <Pressable
-      onPress={onPress}
-      onPressIn={pressIn}
-      onPressOut={pressOut}
-      android_ripple={{ color: colors.brand50 }}
-    >
+    <Pressable onPress={onPress} onPressIn={pressIn} onPressOut={pressOut} android_ripple={{ color: colors.brand50 }}>
       {content}
     </Pressable>
   );
@@ -315,14 +257,60 @@ export function SectionTitle({ title, action, onAction }: { title: string; actio
   return (
     <View style={styles.sectionTitle}>
       <View style={styles.sectionTitleLeft}>
-        <View style={styles.sectionBar} />
+        <View style={styles.sectionDiamond} />
         <Text style={styles.sectionTitleText}>{title}</Text>
       </View>
       {action ? (
-        <Pressable onPress={onAction} hitSlop={8}>
+        <Pressable onPress={onAction} hitSlop={10}>
           <Text style={styles.sectionAction}>{action}</Text>
         </Pressable>
       ) : null}
+    </View>
+  );
+}
+
+/** A quiet horizontal ticker of words, used on the sign-in poster. */
+export function Marquee({
+  items,
+  speed = 26000,
+  tone = colors.ink500,
+}: {
+  items: string[];
+  speed?: number;
+  tone?: string;
+}) {
+  const x = useRef(new Animated.Value(0)).current;
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    if (!width) return;
+    x.setValue(0);
+    const loop = Animated.loop(
+      Animated.timing(x, { toValue: -width, duration: speed, easing: Easing.linear, useNativeDriver: true }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [speed, width, x]);
+
+  const onLayout = (event: LayoutChangeEvent) => {
+    const next = event.nativeEvent.layout.width / 2;
+    if (next > 0 && Math.abs(next - width) > 1) setWidth(next);
+  };
+
+  return (
+    <View style={styles.marquee}>
+      <Animated.View style={[styles.marqueeTrack, { transform: [{ translateX: x }] }]} onLayout={onLayout}>
+        {[0, 1].map((copy) => (
+          <View key={copy} style={styles.marqueeGroup} accessibilityElementsHidden={copy === 1}>
+            {items.map((item, index) => (
+              <View key={`${copy}-${item}-${index}`} style={styles.marqueeItem}>
+                <Text style={[styles.marqueeText, { color: tone }]}>{item}</Text>
+                <Text style={styles.marqueeStar}>✳</Text>
+              </View>
+            ))}
+          </View>
+        ))}
+      </Animated.View>
     </View>
   );
 }
@@ -351,49 +339,16 @@ export function Button({
   size?: 'sm' | 'md' | 'lg';
 }) {
   const inactive = disabled || loading;
-  const height = size === 'sm' ? 36 : size === 'lg' ? 56 : 48;
-  const textColor = variant === 'primary' || variant === 'danger' || variant === 'success' ? colors.white : colors.brand700;
-  const { scale, pressIn, pressOut } = useScalePress(0.97);
-
-  const body = (
-    <View style={styles.buttonInner}>
-      {loading ? <ActivityIndicator size="small" color={textColor} /> : null}
-      <Text style={[styles.buttonLabel, { color: textColor, fontSize: size === 'sm' ? font.size.sm : font.size.md }]}>
-        {label}
-      </Text>
-    </View>
-  );
-
-  if (variant === 'primary' && !inactive) {
-    return (
-      <Pressable
-        onPress={onPress}
-        onPressIn={pressIn}
-        onPressOut={pressOut}
-        disabled={inactive}
-        style={style}
-        android_ripple={{ color: '#ffffff33' }}
-      >
-        <Animated.View style={{ transform: [{ scale }] }}>
-          <LinearGradient
-            colors={gradients.primary as unknown as string[]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={[styles.button, { height }, shadow.card]}
-          >
-            {body}
-          </LinearGradient>
-        </Animated.View>
-      </Pressable>
-    );
-  }
+  const height = size === 'sm' ? 38 : size === 'lg' ? 54 : 48;
+  const textColor = variant === 'primary' || variant === 'danger' || variant === 'success' ? colors.paper : colors.ink900;
+  const { scale, pressIn, pressOut } = useScalePress(0.975);
 
   const tone: Record<ButtonVariant, ViewStyle> = {
-    primary: {},
-    secondary: { backgroundColor: colors.brand100, borderColor: colors.brand200, borderWidth: 1 },
-    ghost: { backgroundColor: 'transparent' },
-    danger: { backgroundColor: colors.rose },
-    success: { backgroundColor: colors.mint },
+    primary: { backgroundColor: colors.ink900, borderColor: colors.ink900 },
+    secondary: { backgroundColor: 'transparent', borderColor: colors.ink900, borderWidth: 1 },
+    ghost: { backgroundColor: 'transparent', borderColor: 'transparent' },
+    danger: { backgroundColor: colors.clay, borderColor: colors.clay },
+    success: { backgroundColor: colors.mint, borderColor: colors.mint },
   };
 
   return (
@@ -402,11 +357,14 @@ export function Button({
       onPressIn={pressIn}
       onPressOut={pressOut}
       disabled={inactive}
-      android_ripple={{ color: '#ffffff22' }}
+      android_ripple={{ color: 'rgba(255,255,255,0.18)' }}
       style={[style, inactive && styles.disabled]}
     >
       <Animated.View style={[styles.button, { height }, tone[variant], { transform: [{ scale }] }]}>
-        {body}
+        <View style={styles.buttonInner}>
+          {loading ? <ActivityIndicator size="small" color={textColor} /> : null}
+          <Text style={[styles.buttonLabel, { color: textColor, fontSize: size === 'sm' ? 10 : 11 }]}>{label}</Text>
+        </View>
       </Animated.View>
     </Pressable>
   );
@@ -417,19 +375,30 @@ export function Field({
   hint,
   error,
   style,
+  onFocus,
+  onBlur,
   ...inputProps
 }: {
   label?: string;
   hint?: string;
   error?: string | null;
 } & TextInputProps) {
+  const [focused, setFocused] = useState(false);
   return (
     <View style={styles.field}>
       {label ? <Text style={styles.fieldLabel}>{label}</Text> : null}
       <TextInput
         placeholderTextColor={colors.ink300}
-        style={[styles.input, error ? styles.inputError : null, style]}
         {...inputProps}
+        onFocus={(event) => {
+          setFocused(true);
+          onFocus?.(event);
+        }}
+        onBlur={(event) => {
+          setFocused(false);
+          onBlur?.(event);
+        }}
+        style={[styles.input, focused && styles.inputFocused, error ? styles.inputError : null, style]}
       />
       {error ? (
         <Text style={styles.fieldError}>{error}</Text>
@@ -449,7 +418,7 @@ export function Chip({
   active?: boolean;
   onPress?: () => void;
 }) {
-  const { scale, pressIn, pressOut } = useScalePress(0.95);
+  const { scale, pressIn, pressOut } = useScalePress(0.96);
   return (
     <Pressable onPress={onPress} onPressIn={pressIn} onPressOut={pressOut}>
       <Animated.View style={[styles.chip, active && styles.chipActive, { transform: [{ scale }] }]}>
@@ -478,20 +447,20 @@ export function Banner({
   action?: string;
   onAction?: () => void;
 }) {
-  const tones: Record<BannerTone, { bg: string; fg: string; border: string }> = {
-    info: { bg: colors.skySoft, fg: colors.sky, border: '#C9DDEB' },
-    success: { bg: colors.mintSoft, fg: colors.mint, border: '#BFE3D5' },
-    warning: { bg: colors.amberSoft, fg: colors.amber, border: '#EAD6B0' },
-    error: { bg: colors.roseSoft, fg: colors.rose, border: '#EBC7C9' },
+  const tones: Record<BannerTone, { bg: string; fg: string; rule: string }> = {
+    info: { bg: colors.skySoft, fg: colors.sky, rule: colors.sky },
+    success: { bg: colors.oliveSoft, fg: colors.mint, rule: colors.mint },
+    warning: { bg: colors.amberSoft, fg: colors.amber, rule: colors.amber },
+    error: { bg: colors.roseSoft, fg: colors.rose, rule: colors.rose },
   };
-  const tone_ = tones[tone];
+  const palette = tones[tone];
   return (
-    <View style={[styles.banner, { backgroundColor: tone_.bg, borderColor: tone_.border }]}>
-      {title ? <Text style={[styles.bannerTitle, { color: tone_.fg }]}>{title}</Text> : null}
-      <Text style={[styles.bannerText, { color: tone_.fg }]}>{message}</Text>
+    <View style={[styles.banner, { backgroundColor: palette.bg, borderLeftColor: palette.rule }]}>
+      {title ? <Text style={[styles.bannerTitle, { color: palette.fg }]}>{title}</Text> : null}
+      <Text style={[styles.bannerText, { color: palette.fg }]}>{message}</Text>
       {action ? (
         <Pressable onPress={onAction} hitSlop={8} style={{ marginTop: space(1.5) }}>
-          <Text style={styles.bannerAction}>{action}</Text>
+          <Text style={[styles.bannerAction, { color: palette.fg }]}>{action}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -507,7 +476,7 @@ export function Badge({ label, bg, fg }: { label: string; bg: string; fg: string
 }
 
 export function Empty({
-  icon = '✨',
+  icon = '✳',
   title,
   message,
   action,
@@ -544,11 +513,6 @@ export type SheetRequest = {
   onConfirm?: () => void;
 };
 
-/**
- * The app's own dialog. Android's `Alert` is a system window with the
- * platform's shape, colours and buttons; this sheet is SalonPro's, with the
- * same monogram, type and motion as the rest of the app.
- */
 export function AppSheet({ request, onClose }: { request: SheetRequest | null; onClose: () => void }) {
   const enter = useRef(new Animated.Value(0)).current;
 
@@ -570,13 +534,14 @@ export function AppSheet({ request, onClose }: { request: SheetRequest | null; o
             styles.sheetCard,
             {
               transform: [
-                { translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [28, 0] }) },
+                { translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) },
                 { scale: enter.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) },
               ],
             },
           ]}
         >
-          <BrandMark size={44} />
+          <View style={styles.sheetRule} />
+          <Text style={styles.sheetKicker}>SALONPRO</Text>
           <Text style={styles.sheetTitle}>{request.title}</Text>
           {request.message ? (
             <Text style={[styles.sheetMessage, request.tone === 'error' && styles.sheetMessageError]}>
@@ -611,7 +576,7 @@ export function AppSheet({ request, onClose }: { request: SheetRequest | null; o
 export function Loading({ label }: { label?: string }) {
   return (
     <View style={styles.loading}>
-      <ActivityIndicator color={colors.brand600} size="large" />
+      <ActivityIndicator color={colors.clay} size="small" />
       {label ? <Text style={styles.loadingLabel}>{label}</Text> : null}
     </View>
   );
@@ -621,7 +586,7 @@ export function StatTile({
   label,
   value,
   sub,
-  tone = colors.brand700,
+  tone = colors.ink900,
 }: {
   label: string;
   value: string;
@@ -639,7 +604,7 @@ export function StatTile({
   );
 }
 
-export function Avatar({ name, size = 44, tone = colors.brand600 }: { name: string; size?: number; tone?: string }) {
+export function Avatar({ name, size = 44, tone = colors.ink900 }: { name: string; size?: number; tone?: string }) {
   const initials = name
     .split(/\s+/)
     .filter(Boolean)
@@ -657,7 +622,9 @@ export function Avatar({ name, size = 44, tone = colors.brand600 }: { name: stri
         justifyContent: 'center',
       }}
     >
-      <Text style={{ color: colors.white, fontWeight: font.weight.bold, fontSize: size * 0.36 }}>{initials || '•'}</Text>
+      <Text style={{ color: colors.paper, fontFamily: font.family.display, fontSize: size * 0.42 }}>
+        {initials || '•'}
+      </Text>
     </View>
   );
 }
@@ -684,9 +651,9 @@ export function BarChart({
             <View
               style={{
                 width: '100%',
-                height: Math.max(4, (point.value / max) * (height - 30)),
-                borderRadius: 6,
-                backgroundColor: point.value > 0 ? colors.brand500 : colors.brand100,
+                height: Math.max(3, (point.value / max) * (height - 30)),
+                borderRadius: 2,
+                backgroundColor: point.value > 0 ? colors.ink800 : colors.ink100,
               }}
             />
           </View>
@@ -703,7 +670,7 @@ export function BarChart({
   );
 }
 
-export function ProgressBar({ ratio, tone = colors.brand500 }: { ratio: number; tone?: string }) {
+export function ProgressBar({ ratio, tone = colors.clay }: { ratio: number; tone?: string }) {
   const clamped = Math.max(0, Math.min(1, Number.isFinite(ratio) ? ratio : 0));
   return (
     <View style={styles.progressTrack}>
@@ -717,27 +684,189 @@ export { LinearGradient };
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   scrollPad: { padding: space(4), gap: space(3) },
-  pressed: { opacity: 0.85 },
-  disabled: { opacity: 0.5 },
+  disabled: { opacity: 0.45 },
 
   header: {
     paddingHorizontal: space(5),
-    paddingTop: space(3),
-    paddingBottom: space(6),
-    borderBottomLeftRadius: radius.xl,
-    borderBottomRightRadius: radius.xl,
+    paddingTop: space(2),
+    paddingBottom: space(5),
+    borderRadius: radius.lg,
     overflow: 'hidden',
   },
-  headerBlob1: { position: 'absolute', top: -70, right: -36, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(217, 119, 87, 0.18)' },
-  headerBlob2: { position: 'absolute', bottom: -80, left: -30, width: 150, height: 150, borderRadius: 75, backgroundColor: 'rgba(255, 255, 255, 0.07)' },
-  headerBlob3: { position: 'absolute', top: 24, right: 70, width: 54, height: 54, borderRadius: 27, backgroundColor: 'rgba(201, 162, 39, 0.14)' },
-  headerTop: { flexDirection: 'row', alignItems: 'center', gap: space(3) },
-  headerTitle: { fontFamily: font.family.display, color: colors.white, fontSize: font.size.xxl, fontWeight: font.weight.bold, letterSpacing: -0.6 },
-  headerSubtitle: { color: colors.brand100, fontSize: font.size.sm, marginTop: 3, lineHeight: 19 },
+  headerRing: {
+    position: 'absolute',
+    top: -86,
+    right: -66,
+    width: 218,
+    height: 218,
+    borderRadius: 109,
+    borderWidth: 1,
+    borderColor: 'rgba(251,248,242,0.14)',
+  },
+  headerDot: { position: 'absolute', top: 44, right: 54, width: 7, height: 7, borderRadius: 4, backgroundColor: colors.clay },
+  headerAsterisk: {
+    position: 'absolute',
+    right: -16,
+    bottom: -46,
+    fontFamily: font.family.display,
+    fontSize: 152,
+    lineHeight: 166,
+    color: 'rgba(196,71,43,0.22)',
+  },
+  headerTop: { flexDirection: 'row', alignItems: 'flex-start', gap: space(3) },
+  headerKickerRow: { flexDirection: 'row', alignItems: 'center', gap: space(2), marginBottom: space(2) },
+  headerRule: { width: 18, height: 1, backgroundColor: colors.clay },
+  headerKicker: { ...labelStyle('light'), fontSize: 8, letterSpacing: 2 },
+  headerTitle: {
+    fontFamily: font.family.display,
+    color: colors.paper,
+    fontSize: font.size.xxl,
+    fontWeight: font.weight.regular,
+    letterSpacing: -0.6,
+    lineHeight: Math.round(font.size.xxl * 1.02),
+  },
+  headerSubtitle: {
+    color: 'rgba(251,248,242,0.52)',
+    fontSize: 9,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    marginTop: space(2),
+    lineHeight: 15,
+  },
+
+  card: {
+    backgroundColor: colors.paper,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  cardPad: { padding: space(4) },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.line },
+
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: space(3) },
+  rowLabel: { color: colors.ink500, fontSize: font.size.sm, flexShrink: 0 },
+  rowValue: {
+    color: colors.ink900,
+    fontSize: font.size.sm,
+    fontWeight: font.weight.semibold,
+    textAlign: 'right',
+    flexShrink: 1,
+  },
+  rowValueStrong: { fontFamily: font.family.display, fontSize: font.size.lg, fontWeight: font.weight.regular },
+
+  sectionTitle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: space(3),
+    paddingBottom: space(2),
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+  },
+  sectionTitleLeft: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
+  sectionDiamond: {
+    width: 5,
+    height: 5,
+    backgroundColor: colors.clay,
+    transform: [{ rotate: '45deg' }],
+  },
+  sectionTitleText: {
+    fontFamily: font.family.display,
+    fontSize: font.size.xl,
+    fontWeight: font.weight.regular,
+    letterSpacing: -0.3,
+    color: colors.ink900,
+  },
+  sectionAction: {
+    ...labelStyle('muted'),
+    fontSize: 8.5,
+    letterSpacing: 1.2,
+    textDecorationLine: 'underline',
+    textDecorationColor: colors.line,
+  },
+
+  marquee: {
+    overflow: 'hidden',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.line,
+    paddingVertical: space(2.5),
+  },
+  marqueeTrack: { flexDirection: 'row' },
+  marqueeGroup: { flexDirection: 'row', alignItems: 'center' },
+  marqueeItem: { flexDirection: 'row', alignItems: 'center' },
+  marqueeText: { ...labelStyle('muted'), fontSize: 8.5, letterSpacing: 1.8 },
+  marqueeStar: { color: colors.clay, fontSize: 8, marginHorizontal: space(3) },
+
+  button: {
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: space(5),
+  },
+  buttonInner: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
+  buttonLabel: { fontWeight: font.weight.bold, letterSpacing: 1.3, textTransform: 'uppercase' },
+
+  field: { gap: space(1) },
+  fieldLabel: { ...labelStyle('muted'), fontSize: 8.5, letterSpacing: 1.5 },
+  input: {
+    backgroundColor: 'transparent',
+    borderBottomWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: 0,
+    paddingTop: space(2),
+    paddingBottom: space(2),
+    fontSize: font.size.lg,
+    color: colors.ink900,
+  },
+  inputFocused: { borderColor: colors.ink900 },
+  inputError: { borderColor: colors.rose },
+  fieldHint: { fontSize: font.size.xs, color: colors.ink400, lineHeight: 15 },
+  fieldError: { fontSize: font.size.xs, color: colors.clay, lineHeight: 15 },
+
+  chip: {
+    paddingHorizontal: space(3.5),
+    paddingVertical: space(2),
+    borderRadius: radius.pill,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  chipActive: { backgroundColor: colors.ink900, borderColor: colors.ink900 },
+  chipText: { fontSize: font.size.xs, color: colors.ink600, fontWeight: font.weight.semibold, letterSpacing: 0.4 },
+  chipTextActive: { color: colors.paper },
+
+  banner: {
+    borderRadius: radius.sm,
+    borderLeftWidth: 3,
+    paddingHorizontal: space(3.5),
+    paddingVertical: space(3),
+    gap: space(1),
+  },
+  bannerTitle: { ...labelStyle('muted'), fontSize: 8.5, letterSpacing: 1.3 },
+  bannerText: { fontSize: font.size.sm, lineHeight: 19 },
+  bannerAction: { ...labelStyle('muted'), fontSize: 8.5, letterSpacing: 1.2, textDecorationLine: 'underline' },
+
+  badge: { borderRadius: 4, paddingHorizontal: space(2), paddingVertical: 3 },
+  badgeText: { fontSize: 8, fontWeight: font.weight.bold, letterSpacing: 1, textTransform: 'uppercase' },
+
+  empty: { alignItems: 'center', paddingVertical: space(8), paddingHorizontal: space(6), gap: space(2) },
+  emptyIcon: { fontFamily: font.family.display, fontSize: 34, color: colors.clay },
+  emptyTitle: {
+    fontFamily: font.family.display,
+    fontSize: font.size.xl,
+    fontWeight: font.weight.regular,
+    color: colors.ink900,
+    textAlign: 'center',
+  },
+  emptyMessage: { fontSize: font.size.sm, color: colors.ink500, textAlign: 'center', lineHeight: 19 },
+
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space(3), paddingVertical: space(10) },
+  loadingLabel: { ...labelStyle('muted'), fontSize: 8.5, letterSpacing: 1.6 },
 
   sheetBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(11, 59, 52, 0.62)',
+    backgroundColor: 'rgba(11,10,7,0.72)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: space(5),
@@ -745,98 +874,39 @@ const styles = StyleSheet.create({
   sheetCard: {
     width: '100%',
     maxWidth: 380,
-    backgroundColor: colors.white,
+    backgroundColor: colors.paper,
     borderRadius: radius.xl,
-    padding: space(5),
+    padding: space(6),
+    paddingTop: space(6),
     gap: space(2.5),
     ...shadow.raised,
   },
+  sheetRule: { position: 'absolute', top: 0, left: space(6), width: 42, height: 2, backgroundColor: colors.clay },
+  sheetKicker: { ...labelStyle('muted'), fontSize: 8, letterSpacing: 2 },
   sheetTitle: {
     fontFamily: font.family.display,
-    fontSize: font.size.xl,
-    fontWeight: font.weight.bold,
+    fontSize: font.size.xxl,
+    fontWeight: font.weight.regular,
     color: colors.ink900,
-    letterSpacing: -0.4,
-    lineHeight: 26,
+    letterSpacing: -0.6,
+    lineHeight: 34,
   },
-  sheetMessage: { fontSize: font.size.sm, color: colors.ink600, lineHeight: 21 },
+  sheetMessage: { fontSize: font.size.sm, color: colors.ink600, lineHeight: 20 },
   sheetMessageError: { color: colors.rose },
-  sheetActions: { flexDirection: 'row', gap: space(2), marginTop: space(1) },
+  sheetActions: { flexDirection: 'row', gap: space(2), marginTop: space(2) },
 
-  card: { backgroundColor: colors.white, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.ink100, ...shadow.card },
-  cardPad: { padding: space(4) },
-  divider: { height: 1, backgroundColor: colors.ink100 },
-
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: space(3) },
-  rowLabel: { color: colors.ink500, fontSize: font.size.sm, flexShrink: 0 },
-  rowValue: { color: colors.ink800, fontSize: font.size.md, fontWeight: font.weight.semibold, textAlign: 'right', flexShrink: 1 },
-  rowValueStrong: { fontSize: font.size.lg, fontWeight: font.weight.bold },
-
-  sectionTitle: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: space(2),
+  statTile: { flex: 1, gap: 2 },
+  statLabel: { ...labelStyle('muted'), fontSize: 8, letterSpacing: 1.2 },
+  statValue: {
+    fontFamily: font.family.display,
+    fontSize: font.size.xxl,
+    fontWeight: font.weight.regular,
+    letterSpacing: -0.5,
   },
-  sectionTitleLeft: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
-  sectionBar: { width: 4, height: 18, borderRadius: 999, backgroundColor: colors.brand500 },
-  sectionTitleText: { fontSize: font.size.lg, fontWeight: font.weight.bold, color: colors.ink900 },
-  sectionAction: { color: colors.brand600, fontWeight: font.weight.semibold, fontSize: font.size.sm },
+  statSub: { fontSize: 9, color: colors.ink400 },
 
-  button: { borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space(5) },
-  buttonInner: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
-  buttonLabel: { fontWeight: font.weight.bold, letterSpacing: 0.2 },
-
-  field: { gap: space(1.5) },
-  fieldLabel: { fontSize: font.size.sm, color: colors.ink600, fontWeight: font.weight.semibold },
-  input: {
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.ink200,
-    borderRadius: radius.md,
-    paddingHorizontal: space(4),
-    paddingVertical: space(3),
-    fontSize: font.size.md,
-    color: colors.ink900,
-  },
-  inputError: { borderColor: colors.rose },
-  fieldHint: { fontSize: font.size.xs, color: colors.ink400 },
-  fieldError: { fontSize: font.size.xs, color: colors.rose },
-
-  chip: {
-    paddingHorizontal: space(3.5),
-    paddingVertical: space(2),
-    borderRadius: radius.pill,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.ink200,
-  },
-  chipActive: { backgroundColor: colors.brand600, borderColor: colors.brand600 },
-  chipText: { fontSize: font.size.sm, color: colors.ink600, fontWeight: font.weight.semibold },
-  chipTextActive: { color: colors.white },
-
-  banner: { borderRadius: radius.md, borderWidth: 1, padding: space(3.5), gap: space(1) },
-  bannerTitle: { fontWeight: font.weight.bold, fontSize: font.size.sm },
-  bannerText: { fontSize: font.size.sm, lineHeight: 20 },
-  bannerAction: { color: colors.brand700, fontWeight: font.weight.bold, fontSize: font.size.sm },
-
-  badge: { borderRadius: radius.pill, paddingHorizontal: space(2.5), paddingVertical: space(1) },
-  badgeText: { fontSize: font.size.xs, fontWeight: font.weight.bold },
-
-  empty: { alignItems: 'center', paddingVertical: space(8), paddingHorizontal: space(6), gap: space(2) },
-  emptyIcon: { fontSize: 34 },
-  emptyTitle: { fontSize: font.size.lg, fontWeight: font.weight.bold, color: colors.ink800, textAlign: 'center' },
-  emptyMessage: { fontSize: font.size.sm, color: colors.ink500, textAlign: 'center', lineHeight: 20 },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space(3), paddingVertical: space(10) },
-  loadingLabel: { color: colors.ink500, fontSize: font.size.sm },
-
-  statTile: { flex: 1, gap: space(1) },
-  statLabel: { fontSize: font.size.xs, color: colors.ink500, fontWeight: font.weight.semibold, textTransform: 'uppercase', letterSpacing: 0.4 },
-  statValue: { fontSize: font.size.xl, fontWeight: font.weight.heavy, letterSpacing: -0.5 },
-  statSub: { fontSize: font.size.xs, color: colors.ink400 },
-
-  barValue: { fontSize: 9, color: colors.ink500, marginBottom: 2 },
-  barLabel: { fontSize: 9, color: colors.ink400, textAlign: 'center' },
-  progressTrack: { height: 8, borderRadius: 999, backgroundColor: colors.ink100, overflow: 'hidden' },
-  progressFill: { height: '100%', borderRadius: 999 },
+  barValue: { fontSize: 8, color: colors.ink500, marginBottom: 2 },
+  barLabel: { fontSize: 8, color: colors.ink400, textAlign: 'center' },
+  progressTrack: { height: 3, backgroundColor: colors.line, overflow: 'hidden' },
+  progressFill: { height: '100%' },
 });

@@ -233,7 +233,7 @@ opens:
 
 | App | Package | Source | Version |
 |---|---|---|---|
-| **SalonPro (unified)** | `com.salonpro.app` | `apps/mobile/` | 2.1.0 |
+| **SalonPro (unified)** | `com.salonpro.app` | `apps/mobile/` | 2.2.0 |
 | Frozen reference | `com.salonpro.app` | `apps/mobile-customer/` | 1.0.5 |
 | Frozen reference | `com.salonpro.admin` | `apps/mobile-admin/` | 1.0.5 |
 
@@ -241,8 +241,8 @@ The app is React Native 0.87 (Hermes, new architecture) with React Navigation 7,
 AsyncStorage sessions, a shared theme and component kit, and hand-drawn charts —
 so an Android build needs **no NDK-level styling dependencies**. Screens are
 styled with plain `StyleSheet` against `apps/mobile-shared/src/theme.ts`: the same
-evergreen-over-ivory SalonPro palette, with no NativeWind or Reanimated in the
-tree (they would pull in CMake/NDK work for no user-visible gain here). Motion
+paper-and-ink SalonPro palette (bundled Instrument Serif for display, hairline
+rules, one vermilion accent), with no NativeWind or Reanimated in the tree (they would pull in CMake/NDK work for no user-visible gain here). Motion
 uses React Native's own `Animated`.
 
 The permission catalog is the contract: tabs and action controls are rendered
@@ -274,7 +274,7 @@ runs `./gradlew assembleRelease`. It reads `versionName` from
 label. Output lands in `artifacts/`:
 
 ```
-artifacts/mobile-customer-2.1.0.apk      (com.salonpro.app, unified)
+artifacts/mobile-customer-2.2.0.apk      (com.salonpro.app, unified)
 ```
 
 The `mobile-customer-` prefix is intentional since 2.0.0: installed 1.0.5
@@ -297,7 +297,7 @@ Install over USB:
 
 ```bash
 bash scripts/install-apks.sh       # restarts adb, waits for authorization, installs the built APK
-adb install -r artifacts/mobile-customer-2.1.0.apk
+adb install -r artifacts/mobile-customer-2.2.0.apk
 ```
 
 The old `com.salonpro.admin` app is retired. Android will not install a different

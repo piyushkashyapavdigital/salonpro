@@ -53,7 +53,7 @@ function TabButton({
   return (
     <Pressable
       onPress={onPress}
-      onPressIn={() => Animated.spring(press, { toValue: 0.93, useNativeDriver: true, ...motion.spring }).start()}
+      onPressIn={() => Animated.spring(press, { toValue: 0.94, useNativeDriver: true, ...motion.spring }).start()}
       onPressOut={() => Animated.spring(press, { toValue: 1, useNativeDriver: true, ...motion.spring }).start()}
       accessibilityRole="tab"
       accessibilityState={{ selected: active }}
@@ -72,7 +72,11 @@ function TabButton({
           },
         ]}
       >
-        <MaterialIcons name={item.icon} size={21} color={active ? colors.white : colors.ink400} />
+        <MaterialIcons
+          name={item.icon}
+          size={18}
+          color={active ? colors.paper : 'rgba(251,248,242,0.46)'}
+        />
       </Animated.View>
       <Text style={[styles.label, active && styles.labelActive]} numberOfLines={1}>
         {item.label}
@@ -82,11 +86,9 @@ function TabButton({
 }
 
 /**
- * The one bottom bar for every workspace screen.
- *
- * It lives in the stack's `layout` rather than inside a tab navigator, so it is
- * still there when a detail, settings or full-screen form is pushed. Tapping a
- * destination returns to the main tab shell and switches tabs.
+ * The one bottom bar for every workspace screen: a floating ink capsule with a
+ * vermilion seat for the current room. It lives in the stack's `layout` rather
+ * than inside a tab navigator, so it survives pushed detail screens.
  */
 export function GlobalTabBar({
   items,
@@ -100,9 +102,8 @@ export function GlobalTabBar({
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, space(2)) }]}>
-      <View style={styles.handle} />
-      <View style={styles.row}>
+    <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, space(2.5)) }]}>
+      <View style={styles.capsule}>
         {items.map((item) => (
           <TabButton
             key={item.name}
@@ -165,45 +166,42 @@ const styles = StyleSheet.create({
   shell: { flex: 1, backgroundColor: colors.canvas },
   content: { flex: 1 },
   bar: {
-    backgroundColor: colors.white,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.ink100,
+    backgroundColor: colors.canvas,
     paddingTop: space(1.5),
-    ...shadow.card,
   },
-  handle: {
-    alignSelf: 'center',
-    width: 34,
-    height: 3,
-    borderRadius: 999,
-    backgroundColor: colors.brand200,
-    marginBottom: space(1),
-  },
-  row: {
+  capsule: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'stretch',
+    marginHorizontal: space(3.5),
     paddingHorizontal: space(1.5),
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: colors.ink900,
+    ...shadow.raised,
   },
   item: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
-    paddingVertical: 3,
+    paddingVertical: 2,
   },
   iconWrap: {
-    width: 42,
+    width: 34,
     height: 28,
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconWrapActive: { backgroundColor: colors.brand700 },
+  iconWrapActive: { backgroundColor: colors.clay },
   label: {
-    fontSize: 10,
-    lineHeight: 13,
-    fontWeight: font.weight.semibold,
-    color: colors.ink500,
+    fontSize: 7.5,
+    lineHeight: 10,
+    fontWeight: font.weight.bold,
+    letterSpacing: 0.9,
+    textTransform: 'uppercase',
+    color: 'rgba(251,248,242,0.48)',
   },
-  labelActive: { color: colors.brand700 },
+  labelActive: { color: colors.paper },
 });

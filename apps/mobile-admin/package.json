@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "android": "react-native run-android",
-    "start": "react-native start",
+    "start": "node init && react-native start",
     "lint": "eslint .",
     "test": "jest",
     "typecheck": "tsc --noEmit",

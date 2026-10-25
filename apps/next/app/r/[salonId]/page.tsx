@@ -167,6 +167,9 @@ export default function ReviewPage() {
   const isPositive = rating >= 4;
   const canGoogle = Boolean(info?.googleConfigured && info.googleReviewUrl);
   const effectiveToken = info?.tokenInvalid ? '' : token;
+  /** A placeholder is not an address; never show it to a customer. */
+  const displayAddress =
+    info?.salon.address && !/address not set/i.test(info.salon.address) ? info.salon.address : '';
   const monogram = useMemo(() => {
     const words = (info?.salon.name ?? 'Salon')
       .replace(/([a-z])([A-Z])/g, '$1 $2')
@@ -331,7 +334,7 @@ export default function ReviewPage() {
         <p className={styles.eyebrow}>{info.salon.name}</p>
         <h1 className={styles.title}>How was your visit?</h1>
         <p className={styles.lede}>
-          {info.salon.address ? `${info.salon.address} · ` : ''}Your feedback helps the salon do better.
+          {displayAddress ? `${displayAddress} · ` : ''}Your feedback helps the salon do better.
         </p>
 
         {info.reviewer ? (
