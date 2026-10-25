@@ -2,15 +2,15 @@
   "name": "salonpro",
   "private": true,
   "version": "1.0.0",
-  "description": "SalonPro — salon management platform (Next.js API on Vercel + customer & admin React Native apps)",
+  "description": "SalonPro \u2014 salon management platform (Next.js API on Vercel + customer & admin React Native apps)",
   "workspaces": [
     "packages/*",
     "apps/next"
   ],
   "scripts": {
-    "dev": "bun --filter @salonpro/next dev",
-    "build": "bash scripts/build-next.sh",
-    "start": "bun --filter @salonpro/next start",
+    "dev": "node init && bun --filter @salonpro/next dev",
+    "build": "node init && bash scripts/build-next.sh",
+    "start": "node init && bun --filter @salonpro/next start",
     "seed": "bun --filter @salonpro/core seed",
     "test": "bun --filter @salonpro/shared test && bun --filter @salonpro/core test && bun --filter @salonpro/next test",
     "test:api": "bun --filter @salonpro/core test",

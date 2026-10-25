@@ -1,10 +1,9 @@
 /**
- * Unified sign-in: one phone + one-time code. After verification the server
- * session decides whether this opens the client, vendor or platform workspace.
+ * Unified sign-in.
  *
- * Demo servers also expose a PIN-only switcher below the normal form. Each
- * shortcut asks the server for the first seeded account in that workspace, so
- * testing admin → vendor → client never means juggling phone numbers.
+ * A printed poster, not a form: the wordmark, a serif welcome, a ticker of the
+ * three rooms, then one quiet panel. Demo servers add a dark "backstage" card
+ * that opens the seeded account for any workspace with a PIN.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -15,66 +14,61 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../shared/auth';
 import { auth } from '../shared/endpoints';
 import { errorMessage } from '../shared/hooks';
 import { ServerCard } from '../shared/ServerCard';
-import { Banner, BrandMark, Button, Card, Field } from '../shared/components';
-import { colors, font, gradients, radius, shadow, space } from '../shared/theme';
+import { Banner, BrandMark, Button, Field, Marquee } from '../shared/components';
+import { colors, font, label, radius, space } from '../shared/theme';
 import { APP_VERSION } from '../config';
 import type { DevLoginRole } from '../shared/types';
 
-const DEMO_ROLES: { role: DevLoginRole; label: string; sub: string; icon: string; tone: string }[] = [
-  { role: 'super_admin', label: 'Platform', sub: 'Super admin', icon: 'admin-panel-settings', tone: colors.grape },
-  { role: 'salon_owner', label: 'Salon owner', sub: 'Full workspace', icon: 'storefront', tone: colors.brand700 },
-  { role: 'customer', label: 'Client', sub: 'Customer app', icon: 'person', tone: colors.mint },
+const WORKSPACES: { role: DevLoginRole; label: string; sub: string }[] = [
+  { role: 'super_admin', label: 'Platform', sub: 'Support console' },
+  { role: 'salon_owner', label: 'Salon owner', sub: 'The full workspace' },
+  { role: 'branch_manager', label: 'Manager', sub: 'One branch, one team' },
+  { role: 'receptionist', label: 'Reception', sub: 'The front desk' },
+  { role: 'customer', label: 'Client', sub: 'The customer app' },
 ];
 
-const EXTRA_ROLES: { role: DevLoginRole; label: string; icon: string }[] = [
-  { role: 'branch_manager', label: 'Manager', icon: 'supervisor-account' },
-  { role: 'receptionist', label: 'Reception', icon: 'support-agent' },
-];
-
-function RoleCard({
-  role,
-  label,
+function RoleRow({
+  index,
+  label: roleLabel,
   sub,
-  icon,
-  tone,
   busy,
+  disabled,
   onPress,
 }: {
-  role: DevLoginRole;
+  index: number;
   label: string;
   sub: string;
-  icon: string;
-  tone: string;
   busy: boolean;
+  disabled: boolean;
   onPress: () => void;
 }) {
   return (
     <Pressable
       onPress={onPress}
-      disabled={busy}
+      disabled={disabled}
       accessibilityRole="button"
-      accessibilityLabel={`Open the demo ${label} account`}
-      style={({ pressed }) => [styles.roleCard, pressed && styles.rolePressed]}
+      accessibilityLabel={`Open the demo ${roleLabel} account`}
+      style={({ pressed }) => [styles.roleRow, pressed && styles.rolePressed]}
     >
-      <View style={[styles.roleIcon, { backgroundColor: tone }]}>
-        {busy ? <ActivityIndicator size="small" color={colors.white} /> : <MaterialIcons name={icon} size={20} color={colors.white} />}
+      <Text style={styles.roleIndex}>{String(index).padStart(2, '0')}</Text>
+      <View style={styles.flex}>
+        <Text style={styles.roleLabel}>{roleLabel}</Text>
+        <Text style={styles.roleSub}>{sub}</Text>
       </View>
-      <Text style={styles.roleLabel} numberOfLines={1}>
-        {label}
-      </Text>
-      <Text style={styles.roleSub} numberOfLines={1}>
-        {sub}
-      </Text>
-      <Text style={styles.roleKey}>{role.replace(/_/g, ' ')}</Text>
+      {busy ? (
+        <ActivityIndicator size="small" color={colors.clay} />
+      ) : (
+        <MaterialIcons name="arrow-forward" size={16} color="rgba(251,248,242,0.42)" />
+      )}
     </Pressable>
   );
 }
@@ -114,10 +108,10 @@ export function SignInScreen() {
   const cleanPhone = phone.replace(/\D/g, '').slice(-10);
   const scrollRef = useRef<React.ElementRef<typeof ScrollView>>(null);
 
-  /** The banner lives above the fold, so bring it into view when it appears. */
+  /** The error appears at the top of the sheet; bring it into view. */
   const showError = (text: string | null) => {
     setError(text);
-    if (text) scrollRef.current?.scrollTo({ y: 0, animated: true });
+    if (text) scrollRef.current?.scrollTo({ y: 250, animated: true });
   };
 
   const requestCode = async () => {
@@ -180,202 +174,183 @@ export function SignInScreen() {
 
   return (
     <View style={styles.root}>
-      <LinearGradient colors={gradients.header as unknown as string[]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-        <View style={styles.heroOrb1} />
-        <View style={styles.heroOrb2} />
-        <View style={styles.heroOrb3} />
-        <SafeAreaView edges={['top']}>
-          <View style={styles.brandRow}>
-            <BrandMark size={46} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.brandName}>SalonPro</Text>
-              <Text style={styles.brandTag}>The whole salon, in one app.</Text>
-            </View>
-          </View>
-          <Text style={styles.heroTitle}>{stage === 'phone' ? 'Welcome back.' : 'Check your messages.'}</Text>
-          <Text style={styles.heroSub}>
-            {stage === 'phone'
-              ? 'Customers, salon teams and platform admins all sign in here. Your account decides where you land.'
-              : `We sent a code to ${cleanPhone}. It expires in 5 minutes.`}
-          </Text>
-          <View style={styles.workspaceStrip}>
-            <View style={styles.workspacePill}>
-              <MaterialIcons name="person" size={13} color={colors.brand100} />
-              <Text style={styles.workspaceText}>Client</Text>
-            </View>
-            <View style={styles.workspacePill}>
-              <MaterialIcons name="storefront" size={13} color={colors.brand100} />
-              <Text style={styles.workspaceText}>Salon</Text>
-            </View>
-            <View style={styles.workspacePill}>
-              <MaterialIcons name="admin-panel-settings" size={13} color={colors.brand100} />
-              <Text style={styles.workspaceText}>Platform</Text>
-            </View>
-          </View>
-        </SafeAreaView>
-      </LinearGradient>
-
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.sheetWrap}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
         <ScrollView
           ref={scrollRef}
-          contentContainerStyle={styles.sheet}
+          contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {error ? <Banner tone="error" title="Could not continue" message={error} /> : null}
+          <SafeAreaView edges={['top']} style={styles.poster}>
+            <View style={styles.masthead}>
+              <View style={styles.brandRow}>
+                <BrandMark size={36} />
+                <Text style={styles.wordmark}>
+                  SalonPro<Text style={styles.wordmarkDot}>.</Text>
+                </Text>
+              </View>
+              <Text style={styles.est}>EST. 2026</Text>
+            </View>
 
-          <Card>
-            {stage === 'phone' ? (
-              <>
-                <View style={styles.cardHead}>
-                  <View style={styles.cardIcon}>
-                    <MaterialIcons name="phone-iphone" size={18} color={colors.brand700} />
+            <View style={styles.hero}>
+              <Text style={styles.heroKicker}>CLIENT · SALON · PLATFORM</Text>
+              <Text style={styles.heroTitle}>
+                Your chair{'\n'}is <Text style={styles.heroItalic}>waiting.</Text>
+              </Text>
+              <Text style={styles.heroSub}>
+                {stage === 'phone'
+                  ? 'One app for the people in the chair and the people holding the scissors.'
+                  : `We sent a code to ${cleanPhone}. It expires in five minutes.`}
+              </Text>
+            </View>
+
+            <Marquee items={['CLIENTS', 'SALONS', 'PLATFORM', 'ONE APP', 'PRIVATE REVIEWS']} />
+          </SafeAreaView>
+
+          <View style={styles.sheet}>
+            {error ? <Banner tone="error" title="Could not continue" message={error} /> : null}
+
+            <View style={styles.panel}>
+              <View style={styles.panelRule} />
+              <Text style={styles.panelKicker}>{stage === 'phone' ? '01 — SIGN IN' : '02 — VERIFY'}</Text>
+              <Text style={styles.panelTitle}>{stage === 'phone' ? 'Welcome back.' : 'Check your messages.'}</Text>
+              <Text style={styles.panelSub}>
+                {stage === 'phone'
+                  ? 'We will text a one-time code. No password to remember.'
+                  : 'Enter the code we sent. It works once and then expires.'}
+              </Text>
+
+              <View style={styles.form}>
+                {stage === 'phone' ? (
+                  <>
+                    <Field
+                      label="Mobile number"
+                      value={phone}
+                      onChangeText={(text) => setPhone(text.replace(/[^\d+\s]/g, ''))}
+                      placeholder="98765 43210"
+                      keyboardType="phone-pad"
+                      maxLength={14}
+                    />
+                    <Button
+                      label={busy ? 'Sending…' : 'Send one-time code'}
+                      onPress={() => void requestCode()}
+                      loading={busy}
+                      size="lg"
+                      style={{ marginTop: space(5) }}
+                    />
+                    <Text style={styles.formNote}>No email. No password. Just the number the salon knows.</Text>
+                  </>
+                ) : (
+                  <>
+                    {devCode ? (
+                      <Banner
+                        tone="warning"
+                        title="DEV MODE — no SMS was sent"
+                        message={`This server has no SMS provider, so the code is shown here instead: ${devCode}`}
+                      />
+                    ) : null}
+                    {notice && !devCode ? <Banner tone="info" message={notice} /> : null}
+                    {isNew ? (
+                      <Field
+                        label="Your name"
+                        value={name}
+                        onChangeText={setName}
+                        placeholder="How the salon should greet you"
+                        autoCapitalize="words"
+                      />
+                    ) : null}
+                    <Field
+                      label="One-time code"
+                      value={code}
+                      onChangeText={(text) => setCode(text.replace(/\D/g, '').slice(0, 6))}
+                      keyboardType="number-pad"
+                      maxLength={6}
+                      autoFocus
+                      style={styles.codeInput}
+                    />
+                    <Button
+                      label={busy ? 'Verifying…' : 'Verify & open the app'}
+                      onPress={() => void verify()}
+                      loading={busy}
+                      size="lg"
+                      style={{ marginTop: space(5) }}
+                    />
+                    <Pressable
+                      onPress={() => {
+                        setStage('phone');
+                        setCode('');
+                        setName('');
+                        setIsNew(false);
+                        setDevCode(null);
+                        setError(null);
+                      }}
+                      hitSlop={8}
+                      style={{ marginTop: space(3), alignSelf: 'center' }}
+                    >
+                      <Text style={styles.link}>Use a different number</Text>
+                    </Pressable>
+                  </>
+                )}
+              </View>
+            </View>
+
+            {devMode ? (
+              <View style={styles.demoPanel}>
+                <View style={styles.demoHead}>
+                  <View style={styles.flex}>
+                    <Text style={styles.demoKicker}>DEMO ACCESS</Text>
+                    <Text style={styles.demoTitle}>Walk into any room.</Text>
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.cardTitle}>Sign in with your phone</Text>
-                    <Text style={styles.cardSub}>We will send a one-time code. No password to remember.</Text>
-                  </View>
+                  <Pressable onPress={() => setPin('1234')} hitSlop={8} style={styles.pinChip}>
+                    <Text style={styles.pinChipText}>Use 1234</Text>
+                  </Pressable>
                 </View>
-                <Field
-                  label="Mobile number"
-                  value={phone}
-                  onChangeText={(text) => setPhone(text.replace(/[^\d+\s]/g, ''))}
-                  placeholder="98765 43210"
-                  keyboardType="phone-pad"
-                  maxLength={14}
-                />
-                <Button
-                  label={busy ? 'Sending…' : 'Send one-time code'}
-                  onPress={() => void requestCode()}
-                  loading={busy}
-                  size="lg"
-                  style={{ marginTop: space(4) }}
-                />
-              </>
-            ) : (
-              <>
-                {devCode ? (
-                  <Banner
-                    tone="warning"
-                    title="DEV MODE — no SMS was sent"
-                    message={`This server has no SMS provider, so the code is shown here instead: ${devCode}`}
-                  />
-                ) : null}
-                {notice && !devCode ? <Banner tone="info" message={notice} /> : null}
-                {isNew ? (
-                  <Field
-                    label="Your name"
-                    value={name}
-                    onChangeText={setName}
-                    placeholder="How the salon should greet you"
-                    autoCapitalize="words"
-                  />
-                ) : null}
-                <Field
-                  label="One-time code"
-                  value={code}
-                  onChangeText={(text) => setCode(text.replace(/\D/g, '').slice(0, 6))}
+                <Text style={styles.demoNote}>
+                  The PIN opens the first seeded account for that workspace. Enter it once, then choose a room.
+                </Text>
+
+                <Text style={styles.pinLabel}>DEVELOPER PIN</Text>
+                <TextInput
+                  value={pin}
+                  onChangeText={(text) => setPin(text.replace(/\D/g, '').slice(0, 8))}
                   keyboardType="number-pad"
-                  maxLength={6}
-                  autoFocus
-                  style={styles.codeInput}
+                  secureTextEntry
+                  maxLength={8}
+                  placeholder="••••"
+                  placeholderTextColor="rgba(251,248,242,0.28)"
+                  style={styles.pinInput}
                 />
-                <Button
-                  label={busy ? 'Verifying…' : 'Verify & open the app'}
-                  onPress={() => void verify()}
-                  loading={busy}
-                  size="lg"
-                  style={{ marginTop: space(4) }}
-                />
-                <Pressable
-                  onPress={() => {
-                    setStage('phone');
-                    setCode('');
-                    setName('');
-                    setIsNew(false);
-                    setDevCode(null);
-                    setError(null);
-                  }}
-                  hitSlop={8}
-                  style={{ marginTop: space(3) }}
-                >
-                  <Text style={styles.link}>Use a different number</Text>
-                </Pressable>
-              </>
-            )}
-          </Card>
 
-          {devMode ? (
-          <Card style={styles.demoCard}>
-            <View style={styles.devHead}>
-              <View style={styles.devIcon}>
-                <MaterialIcons name="bolt" size={18} color={colors.coral} />
+                <View style={styles.roleList}>
+                  {WORKSPACES.map((item, index) => (
+                    <RoleRow
+                      key={item.role}
+                      index={index + 1}
+                      label={item.label}
+                      sub={item.sub}
+                      busy={pinBusyRole === item.role}
+                      disabled={Boolean(pinBusyRole)}
+                      onPress={() => void devLogin(item.role)}
+                    />
+                  ))}
+                </View>
+
+                <Text style={styles.demoFoot}>
+                  Only demo servers show this card. A real deployment turns developer sign-in off.
+                </Text>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.devTitle}>Demo access</Text>
-                <Text style={styles.devNote}>Developer PIN · demo servers only</Text>
-              </View>
-              <Pressable onPress={() => setPin('1234')} hitSlop={8} style={styles.pinChip}>
-                <Text style={styles.pinChipText}>Use 1234</Text>
-              </Pressable>
-            </View>
+            ) : null}
 
-            <Field
-              label="Developer PIN"
-              value={pin}
-              onChangeText={(text) => setPin(text.replace(/\D/g, '').slice(0, 8))}
-              keyboardType="number-pad"
-              secureTextEntry
-              maxLength={8}
-              placeholder="••••"
-            />
-
-            <View style={styles.roleGrid}>
-              {DEMO_ROLES.map((item) => (
-                <RoleCard
-                  key={item.role}
-                  {...item}
-                  busy={pinBusyRole === item.role}
-                  onPress={() => void devLogin(item.role)}
-                />
-              ))}
-            </View>
-
-            <View style={styles.extraRow}>
-              {EXTRA_ROLES.map((item) => (
-                <Pressable
-                  key={item.role}
-                  onPress={() => void devLogin(item.role)}
-                  disabled={Boolean(pinBusyRole)}
-                  style={({ pressed }) => [styles.extraPill, pressed && styles.rolePressed]}
-                >
-                  {pinBusyRole === item.role ? (
-                    <ActivityIndicator size="small" color={colors.brand700} />
-                  ) : (
-                    <MaterialIcons name={item.icon} size={15} color={colors.brand700} />
-                  )}
-                  <Text style={styles.extraText}>{item.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Text style={styles.demoFootnote}>
-              The PIN opens the first seeded account for that workspace. A real server turns developer sign-in off.
-            </Text>
-          </Card>
-          ) : null}
-
-          <Card>
-            <Pressable onPress={() => setShowServer((value) => !value)} style={styles.serverToggle}>
-              <MaterialIcons name="dns" size={18} color={colors.brand700} />
-              <Text style={styles.serverToggleText}>Salon server address</Text>
-              <MaterialIcons name={showServer ? 'expand-less' : 'expand-more'} size={20} color={colors.ink400} />
+            <Pressable onPress={() => setShowServer((value) => !value)} style={styles.serverRow}>
+              <MaterialIcons name="dns" size={15} color={colors.ink500} />
+              <Text style={styles.serverText}>Salon server address</Text>
+              <MaterialIcons name={showServer ? 'expand-less' : 'expand-more'} size={19} color={colors.ink400} />
             </Pressable>
-          </Card>
 
-          {showServer ? <ServerCard /> : null}
+            {showServer ? <ServerCard /> : null}
 
-          <Text style={styles.version}>SalonPro {APP_VERSION}</Text>
+            <Text style={styles.version}>SALONPRO {APP_VERSION}</Text>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -384,51 +359,154 @@ export function SignInScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.canvas },
-  hero: {
-    paddingHorizontal: space(6),
-    paddingBottom: space(9),
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
+  flex: { flex: 1 },
+  scroll: { paddingBottom: space(12) },
+
+  poster: { paddingHorizontal: space(5), paddingBottom: 0 },
+  masthead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: space(3),
+  },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: space(2.5) },
+  wordmark: {
+    fontFamily: font.family.display,
+    fontSize: 26,
+    lineHeight: 30,
+    color: colors.ink900,
+    letterSpacing: -0.5,
+  },
+  wordmarkDot: { color: colors.clay },
+  est: { ...label('muted'), fontSize: 7.5, letterSpacing: 1.8 },
+
+  hero: { marginTop: space(8) },
+  heroKicker: { ...label('muted'), fontSize: 8, letterSpacing: 2 },
+  heroTitle: {
+    fontFamily: font.family.display,
+    fontSize: font.size.hero,
+    lineHeight: 46,
+    letterSpacing: -1.1,
+    color: colors.ink900,
+    marginTop: space(3),
+  },
+  heroItalic: {
+    fontFamily: Platform.select({ android: 'InstrumentSerifItalic', ios: 'Georgia', default: 'Georgia' }),
+    fontStyle: 'italic',
+    color: colors.clay,
+  },
+  heroSub: {
+    fontSize: font.size.sm,
+    lineHeight: 19,
+    color: colors.ink500,
+    marginTop: space(3),
+    maxWidth: 330,
+  },
+
+  sheet: { paddingHorizontal: space(4), paddingTop: space(5), gap: space(3.5) },
+
+  panel: {
+    position: 'relative',
+    backgroundColor: colors.paper,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.lg,
+    padding: space(5),
     overflow: 'hidden',
   },
-  heroOrb1: { position: 'absolute', top: -80, right: -40, width: 190, height: 190, borderRadius: 95, backgroundColor: 'rgba(217, 119, 87, 0.18)' },
-  heroOrb2: { position: 'absolute', bottom: -90, left: -30, width: 150, height: 150, borderRadius: 75, backgroundColor: 'rgba(255,255,255,0.07)' },
-  heroOrb3: { position: 'absolute', top: 34, right: 74, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(201, 162, 39, 0.16)' },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: space(3), marginTop: space(4) },
-  brandName: { color: colors.white, fontFamily: font.family.display, fontSize: font.size.xl, fontWeight: font.weight.bold, letterSpacing: -0.4 },
-  brandTag: { color: colors.brand100, fontSize: font.size.xs, marginTop: 1 },
-  heroTitle: { color: colors.white, fontFamily: font.family.display, fontSize: font.size.hero, fontWeight: font.weight.bold, marginTop: space(6), letterSpacing: -0.8 },
-  heroSub: { color: colors.brand100, fontSize: font.size.sm, marginTop: space(2), lineHeight: 20, maxWidth: 330 },
-  workspaceStrip: { flexDirection: 'row', gap: space(2), marginTop: space(4), flexWrap: 'wrap' },
-  workspacePill: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: space(2.5), paddingVertical: space(1.5) },
-  workspaceText: { color: colors.brand100, fontSize: 10, fontWeight: font.weight.semibold, letterSpacing: 0.3 },
-  sheetWrap: { flex: 1, marginTop: -space(5) },
-  sheet: { padding: space(4), gap: space(3), paddingBottom: space(10) },
-  cardHead: { flexDirection: 'row', alignItems: 'center', gap: space(3), marginBottom: space(3) },
-  cardIcon: { width: 38, height: 38, borderRadius: radius.pill, backgroundColor: colors.brand50, alignItems: 'center', justifyContent: 'center' },
-  cardTitle: { fontSize: font.size.md, fontWeight: font.weight.bold, color: colors.ink900 },
-  cardSub: { fontSize: font.size.xs, color: colors.ink500, marginTop: 2, lineHeight: 17 },
-  codeInput: { fontSize: font.size.xxl, letterSpacing: 10, textAlign: 'center', fontWeight: font.weight.bold },
-  link: { color: colors.brand700, fontWeight: font.weight.semibold, fontSize: font.size.sm, textAlign: 'center' },
-  demoCard: { borderColor: colors.brand100, backgroundColor: '#FFFDF9' },
-  devHead: { flexDirection: 'row', alignItems: 'center', gap: space(2), marginBottom: space(3) },
-  devIcon: { width: 36, height: 36, borderRadius: radius.pill, backgroundColor: colors.coralSoft, alignItems: 'center', justifyContent: 'center' },
-  devTitle: { fontSize: font.size.md, fontWeight: font.weight.bold, color: colors.ink900 },
-  devNote: { fontSize: font.size.xs, color: colors.ink500, marginTop: 1 },
-  pinChip: { paddingHorizontal: space(2.5), paddingVertical: space(1.5), borderRadius: radius.pill, backgroundColor: colors.brand50, borderWidth: 1, borderColor: colors.brand100 },
-  pinChipText: { fontSize: 10, fontWeight: font.weight.bold, color: colors.brand700 },
-  roleGrid: { flexDirection: 'row', gap: space(2), marginTop: space(3) },
-  roleCard: { flex: 1, minWidth: 0, borderRadius: radius.md, borderWidth: 1, borderColor: colors.ink100, backgroundColor: colors.white, padding: space(2.5), gap: 3, ...shadow.card },
-  rolePressed: { opacity: 0.72, transform: [{ scale: 0.98 }] },
-  roleIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 3 },
-  roleLabel: { fontSize: font.size.xs, fontWeight: font.weight.bold, color: colors.ink900 },
-  roleSub: { fontSize: 9, color: colors.ink500 },
-  roleKey: { fontSize: 8, color: colors.ink300, textTransform: 'uppercase', letterSpacing: 0.3 },
-  extraRow: { flexDirection: 'row', gap: space(2), marginTop: space(2) },
-  extraPill: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.ink100, backgroundColor: colors.white, paddingVertical: space(2) },
-  extraText: { fontSize: font.size.xs, fontWeight: font.weight.semibold, color: colors.ink700 },
-  demoFootnote: { fontSize: 10, color: colors.ink400, lineHeight: 15, marginTop: space(2) },
-  serverToggle: { flexDirection: 'row', alignItems: 'center', gap: space(2) },
-  serverToggleText: { flex: 1, fontSize: font.size.md, fontWeight: font.weight.semibold, color: colors.ink800 },
-  version: { textAlign: 'center', color: colors.ink300, fontSize: font.size.xs },
+  panelRule: { position: 'absolute', top: 0, left: space(5), width: 44, height: 2, backgroundColor: colors.clay },
+  panelKicker: { ...label('muted'), fontSize: 8, letterSpacing: 1.8 },
+  panelTitle: {
+    fontFamily: font.family.display,
+    fontSize: 28,
+    lineHeight: 30,
+    letterSpacing: -0.6,
+    color: colors.ink900,
+    marginTop: space(1.5),
+  },
+  panelSub: { fontSize: font.size.sm, lineHeight: 19, color: colors.ink500, marginTop: space(1.5) },
+  form: { marginTop: space(4), gap: space(4) },
+  formNote: { fontSize: 9.5, lineHeight: 15, color: colors.ink400, marginTop: space(1) },
+  codeInput: {
+    fontFamily: font.family.display,
+    fontSize: 34,
+    letterSpacing: 12,
+    textAlign: 'center',
+    paddingVertical: space(1),
+  },
+  link: {
+    ...label('muted'),
+    fontSize: 8.5,
+    letterSpacing: 1.3,
+    textDecorationLine: 'underline',
+    textDecorationColor: colors.line,
+  },
+
+  demoPanel: {
+    backgroundColor: colors.ink900,
+    borderRadius: radius.lg,
+    padding: space(5),
+    overflow: 'hidden',
+  },
+  demoHead: { flexDirection: 'row', alignItems: 'flex-start', gap: space(3) },
+  demoKicker: { ...label('light'), fontSize: 8, letterSpacing: 2 },
+  demoTitle: {
+    fontFamily: font.family.display,
+    fontSize: 27,
+    lineHeight: 30,
+    letterSpacing: -0.5,
+    color: colors.paper,
+    marginTop: space(1),
+  },
+  pinChip: {
+    borderWidth: 1,
+    borderColor: 'rgba(251,248,242,0.24)',
+    borderRadius: radius.pill,
+    paddingHorizontal: space(2.5),
+    paddingVertical: space(1.5),
+  },
+  pinChipText: { ...label('light'), fontSize: 7.5, letterSpacing: 1.2, color: colors.paper },
+  demoNote: { fontSize: 10.5, lineHeight: 16, color: 'rgba(251,248,242,0.5)', marginTop: space(2.5) },
+  pinLabel: { ...label('light'), fontSize: 7.5, letterSpacing: 1.6, marginTop: space(4) },
+  pinInput: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(251,248,242,0.24)',
+    color: colors.paper,
+    fontSize: font.size.xl,
+    letterSpacing: 8,
+    paddingVertical: space(2),
+    paddingHorizontal: 0,
+  },
+
+  roleList: { marginTop: space(4), borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(251,248,242,0.14)' },
+  roleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space(3),
+    paddingVertical: space(3),
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(251,248,242,0.14)',
+  },
+  rolePressed: { opacity: 0.6 },
+  roleIndex: {
+    ...label('light'),
+    fontFamily: font.family.mono,
+    fontSize: 8,
+    letterSpacing: 0.6,
+    width: 18,
+    color: 'rgba(251,248,242,0.34)',
+  },
+  roleLabel: { fontSize: font.size.sm, fontWeight: font.weight.bold, color: colors.paper, letterSpacing: 0.1 },
+  roleSub: { fontSize: 9.5, color: 'rgba(251,248,242,0.45)', marginTop: 1 },
+  demoFoot: { fontSize: 9, lineHeight: 14, color: 'rgba(251,248,242,0.34)', marginTop: space(3) },
+
+  serverRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space(2),
+    paddingVertical: space(2),
+    paddingHorizontal: space(1),
+  },
+  serverText: { flex: 1, ...label('muted'), fontSize: 8.5, letterSpacing: 1.2 },
+  version: { ...label('muted'), fontSize: 7.5, letterSpacing: 2, textAlign: 'center', marginTop: space(2) },
 });

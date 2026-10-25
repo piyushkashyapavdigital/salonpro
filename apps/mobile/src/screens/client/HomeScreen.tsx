@@ -5,7 +5,7 @@
  * cheap to refresh and cannot show half an answer.
  */
 import React, { useCallback } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,8 +13,7 @@ import { useAuth } from '../../shared/auth';
 import { health, customer } from '../../shared/endpoints';
 import { useAsync } from '../../shared/hooks';
 import { Badge, Banner, Button, Card, Empty, Loading, ProgressBar, SectionTitle, StatTile } from '../../shared/components';
-import { colors, font, gradients, radius, shadow, space, statusColors, STATUS_LABEL } from '../../shared/theme';
-import { LinearGradient } from '../../shared/components';
+import { colors, font, label, radius, space, statusColors, STATUS_LABEL } from '../../shared/theme';
 import { formatDate, formatMoney, formatMoneyShort, formatTime12, relativeTime } from '../../core';
 
 export function HomeScreen() {
@@ -34,6 +33,8 @@ export function HomeScreen() {
   if (home.loading && !homeData) return <Loading label="Loading your salon…" />;
 
   const firstName = (user?.name ?? homeData?.profile.name ?? 'there').split(' ')[0];
+  const hour = new Date().getHours();
+  const partOfDay = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   const wallet = homeData?.wallet;
   const next = homeData?.upcoming?.[0];
   const integrations = badges.data;
@@ -45,48 +46,49 @@ export function HomeScreen() {
         contentContainerStyle={{ paddingBottom: space(10) }}
         refreshControl={<RefreshControl refreshing={home.refreshing} onRefresh={refresh} tintColor={colors.brand500} />}
       >
-        <LinearGradient
-          colors={gradients.header as unknown as string[]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.hero}
-        >
+        <View style={styles.poster}>
           <View style={styles.heroTop}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.hello}>Hi {firstName} 👋</Text>
-              <Text style={styles.heroSub}>
-                {homeData?.visitsThisMonth ? `${homeData.visitsThisMonth} visits this month` : 'Ready for a fresh look?'}
-              </Text>
-            </View>
+            <Text style={styles.heroKicker}>SALONPRO · CLIENT</Text>
             <Pressable onPress={() => navigation.navigate('Notifications')} style={styles.bell} hitSlop={8}>
-              <MaterialIcons name="notifications-none" size={22} color={colors.white} />
+              <MaterialIcons name="notifications-none" size={18} color={colors.ink800} />
             </Pressable>
           </View>
 
+          <Text style={styles.hello}>
+            {partOfDay},{'\n'}
+            <Text style={styles.helloName}>{firstName}.</Text>
+          </Text>
+          <Text style={styles.heroSub}>
+            {homeData?.visitsThisMonth
+              ? `${homeData.visitsThisMonth} ${homeData.visitsThisMonth === 1 ? 'visit' : 'visits'} this month · the kettle is on.`
+              : 'Ready for a fresh look? The chair is yours.'}
+          </Text>
+
           <Pressable onPress={() => navigation.navigate('Wallet')} style={styles.walletCard}>
-            <View>
-              <Text style={styles.walletLabel}>Wallet balance</Text>
-              <Text style={styles.walletValue}>{formatMoney(wallet?.totalBalance ?? 0)}</Text>
-              <Text style={styles.walletSplit}>
-                {formatMoney(wallet?.cashBalance ?? 0)} purchased · {formatMoney(wallet?.bonusBalance ?? 0)} bonus
-              </Text>
+            <View style={styles.walletRing} />
+            <View style={styles.walletHead}>
+              <Text style={styles.walletLabel}>WALLET BALANCE</Text>
+              <View style={styles.recharge}>
+                <MaterialIcons name="add" size={12} color={colors.paper} />
+                <Text style={styles.rechargeText}>Top up</Text>
+              </View>
             </View>
-            <View style={styles.recharge}>
-              <MaterialIcons name="add" size={16} color={colors.brand700} />
-              <Text style={styles.rechargeText}>Recharge</Text>
-            </View>
+            <Text style={styles.walletValue}>{formatMoney(wallet?.totalBalance ?? 0)}</Text>
+            <Text style={styles.walletSplit}>
+              {formatMoney(wallet?.cashBalance ?? 0)} purchased · {formatMoney(wallet?.bonusBalance ?? 0)} bonus
+            </Text>
           </Pressable>
 
           {homeData?.loyaltyEnabled ? (
             <View style={styles.loyaltyRow}>
-              <MaterialIcons name="stars" size={16} color={colors.lemon} />
+              <MaterialIcons name="stars" size={13} color={colors.brass} />
               <Text style={styles.loyaltyText}>
                 {homeData.loyalty.points} loyalty points
                 {homeData.loyalty.lifetimePoints ? ` · ${homeData.loyalty.lifetimePoints} earned so far` : ''}
               </Text>
             </View>
           ) : null}
-        </LinearGradient>
+        </View>
 
         <View style={styles.body}>
           {home.error ? <Banner tone="error" title="Could not load" message={home.error} action="Try again" onAction={refresh} /> : null}
@@ -145,21 +147,24 @@ export function HomeScreen() {
           )}
 
           <View style={styles.quickRow}>
-            <QuickAction icon="content-cut" label="Book" color={colors.brand500} soft={colors.brand50} onPress={() => navigation.navigate('Book')} />
-            <QuickAction icon="local-offer" label="Offers" color={colors.lilac} soft={colors.lilacSoft} onPress={() => navigation.navigate('Offers')} />
-            <QuickAction icon="card-giftcard" label="Refer" color={colors.mint} soft={colors.mintSoft} onPress={() => navigation.navigate('Referral')} />
-            <QuickAction icon="receipt-long" label="History" color={colors.sky} soft={colors.skySoft} onPress={() => navigation.navigate('Visits')} />
+            <QuickAction icon="content-cut" label="Book" onPress={() => navigation.navigate('Book')} />
+            <QuickAction icon="local-offer" label="Offers" onPress={() => navigation.navigate('Offers')} />
+            <QuickAction icon="card-giftcard" label="Refer" onPress={() => navigation.navigate('Referral')} />
+            <QuickAction icon="receipt-long" label="History" onPress={() => navigation.navigate('Visits')} />
           </View>
 
           <SectionTitle title="Popular at the salon" action="All services" onAction={() => navigation.navigate('Book')} />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.popularRow}>
-            {(homeData?.popular ?? []).map((service) => (
+            {(homeData?.popular ?? []).map((service, index) => (
               <Pressable
                 key={service.id}
                 onPress={() => navigation.navigate('Book', { serviceId: service.id })}
                 style={styles.popularCard}
               >
-                <Text style={styles.popularEmoji}>{service.imageEmoji || '✨'}</Text>
+                <View style={styles.popularHead}>
+                  <Text style={styles.popularEmoji}>{service.imageEmoji || '✳'}</Text>
+                  <Text style={styles.popularIndex}>{String(index + 1).padStart(2, '0')}</Text>
+                </View>
                 <Text style={styles.popularName} numberOfLines={2}>
                   {service.name}
                 </Text>
@@ -246,12 +251,10 @@ export function HomeScreen() {
   );
 }
 
-function QuickAction({ icon, label, color, soft, onPress }: { icon: string; label: string; color: string; soft: string; onPress: () => void }) {
+function QuickAction({ icon, label, onPress }: { icon: string; label: string; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.quick, pressed && styles.quickPressed]}>
-      <View style={[styles.quickIcon, { backgroundColor: soft }]}>
-        <MaterialIcons name={icon} size={20} color={color} />
-      </View>
+      <MaterialIcons name={icon} size={18} color={colors.ink800} />
       <Text style={styles.quickLabel}>{label}</Text>
     </Pressable>
   );
@@ -259,53 +262,170 @@ function QuickAction({ icon, label, color, soft, onPress }: { icon: string; labe
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.canvas },
-  hero: { paddingHorizontal: space(5), paddingTop: space(3), paddingBottom: space(6), borderBottomLeftRadius: 30, borderBottomRightRadius: 30 },
-  heroTop: { flexDirection: 'row', alignItems: 'center', gap: space(3) },
-  hello: { color: colors.white, fontSize: font.size.xl, fontWeight: font.weight.heavy, letterSpacing: -0.4 },
-  heroSub: { color: colors.brand100, fontSize: font.size.sm, marginTop: 2 },
-  bell: { width: 40, height: 40, borderRadius: radius.pill, backgroundColor: '#ffffff26', alignItems: 'center', justifyContent: 'center' },
-  walletCard: { marginTop: space(5), backgroundColor: '#ffffff1f', borderRadius: radius.lg, padding: space(4), flexDirection: 'row', alignItems: 'center', gap: space(3) },
-  walletLabel: { color: colors.brand100, fontSize: font.size.xs, textTransform: 'uppercase', letterSpacing: 0.6 },
-  walletValue: { color: colors.white, fontSize: font.size.xxl, fontWeight: font.weight.heavy, marginTop: 2, letterSpacing: -0.6 },
-  walletSplit: { color: colors.brand200, fontSize: font.size.xs, marginTop: 2 },
-  recharge: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: space(1), backgroundColor: colors.white, borderRadius: radius.pill, paddingHorizontal: space(3), paddingVertical: space(2) },
-  rechargeText: { color: colors.brand700, fontWeight: font.weight.bold, fontSize: font.size.xs },
-  loyaltyRow: { flexDirection: 'row', alignItems: 'center', gap: space(2), marginTop: space(3) },
-  loyaltyText: { color: colors.lemon, fontSize: font.size.xs, fontWeight: font.weight.semibold },
+
+  poster: {
+    paddingHorizontal: space(5),
+    paddingTop: space(1),
+    paddingBottom: space(5),
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+  },
+  heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  heroKicker: { ...label('muted'), fontSize: 8, letterSpacing: 1.9 },
+  hello: {
+    fontFamily: font.family.display,
+    fontSize: 40,
+    lineHeight: 42,
+    letterSpacing: -1,
+    color: colors.ink900,
+    marginTop: space(5),
+  },
+  helloName: {
+    fontFamily: Platform.select({ android: 'InstrumentSerifItalic', ios: 'Georgia', default: 'Georgia' }),
+    fontStyle: 'italic',
+    color: colors.clay,
+  },
+  heroSub: { fontSize: font.size.sm, lineHeight: 19, color: colors.ink500, marginTop: space(2), maxWidth: 300 },
+  bell: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  walletCard: {
+    marginTop: space(5),
+    backgroundColor: colors.ink900,
+    borderRadius: radius.lg,
+    padding: space(4.5),
+    overflow: 'hidden',
+  },
+  walletRing: {
+    position: 'absolute',
+    top: -60,
+    right: -50,
+    width: 168,
+    height: 168,
+    borderRadius: 84,
+    borderWidth: 1,
+    borderColor: 'rgba(251,248,242,0.12)',
+  },
+  walletHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  walletLabel: { ...label('light'), fontSize: 8, letterSpacing: 1.9 },
+  walletValue: {
+    fontFamily: font.family.display,
+    fontSize: 42,
+    lineHeight: 44,
+    letterSpacing: -1,
+    color: colors.paper,
+    marginTop: space(2),
+  },
+  walletSplit: { fontSize: 9.5, color: 'rgba(251,248,242,0.48)', marginTop: 2 },
+  recharge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(251,248,242,0.28)',
+    borderRadius: radius.pill,
+    paddingHorizontal: space(2.5),
+    paddingVertical: 5,
+  },
+  rechargeText: { ...label('light'), fontSize: 7.5, letterSpacing: 1.1, color: colors.paper },
+  loyaltyRow: { flexDirection: 'row', alignItems: 'center', gap: space(2), marginTop: space(3.5) },
+  loyaltyText: { fontSize: 10, color: colors.ink500, letterSpacing: 0.1 },
+
   body: { padding: space(4), gap: space(3) },
+
   visitHead: { flexDirection: 'row', alignItems: 'center', gap: space(3) },
-  visitDate: { fontSize: font.size.md, fontWeight: font.weight.bold, color: colors.ink900 },
+  visitDate: { fontFamily: font.family.display, fontSize: 19, lineHeight: 22, color: colors.ink900 },
   visitTime: { fontSize: font.size.sm, color: colors.ink500, marginTop: 2 },
   visitBody: { marginTop: space(3), gap: space(1.5) },
   serviceLine: { flexDirection: 'row', justifyContent: 'space-between', gap: space(3) },
   serviceName: { flex: 1, fontSize: font.size.sm, color: colors.ink700 },
   servicePrice: { fontSize: font.size.sm, color: colors.ink500 },
   staffLine: { fontSize: font.size.xs, color: colors.ink400, marginTop: space(1) },
-  visitFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: space(3), paddingTop: space(3), borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.ink100 },
-  visitTotal: { fontSize: font.size.lg, fontWeight: font.weight.bold, color: colors.ink900 },
+  visitFoot: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: space(3),
+    paddingTop: space(3),
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
+  visitTotal: { fontFamily: font.family.display, fontSize: 21, color: colors.ink900 },
   visitPay: { fontSize: font.size.xs, color: colors.ink500 },
+
   quickRow: { flexDirection: 'row', gap: space(2), marginTop: space(1) },
-  quick: { flex: 1, alignItems: 'center', gap: space(1.5), backgroundColor: colors.white, borderRadius: radius.lg, paddingVertical: space(3), ...shadow.card },
-  quickPressed: { transform: [{ scale: 0.96 }], opacity: 0.9 },
-  quickIcon: { width: 38, height: 38, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
-  quickLabel: { fontSize: font.size.xs, color: colors.ink700, fontWeight: font.weight.semibold },
-  popularRow: { gap: space(3), paddingVertical: space(1) },
-  popularCard: { width: 156, backgroundColor: colors.white, borderRadius: radius.lg, padding: space(3.5), gap: space(1), ...shadow.card },
-  popularEmoji: { fontSize: 26 },
-  popularName: { fontSize: font.size.sm, fontWeight: font.weight.bold, color: colors.ink900, minHeight: 34 },
-  popularMeta: { fontSize: font.size.xs, color: colors.ink500 },
-  popularBooked: { fontSize: font.size.xs, color: colors.brand600, fontWeight: font.weight.semibold },
+  quick: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space(2),
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    paddingVertical: space(3.5),
+  },
+  quickPressed: { opacity: 0.55, transform: [{ scale: 0.97 }] },
+  quickLabel: { ...label('muted'), fontSize: 7.5, letterSpacing: 1.1, color: colors.ink700 },
+
+  popularRow: { gap: space(2.5), paddingVertical: space(1) },
+  popularCard: {
+    width: 152,
+    backgroundColor: colors.paper,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    padding: space(3.5),
+    gap: space(1.5),
+    minHeight: 156,
+  },
+  popularHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  popularEmoji: { fontSize: 21, lineHeight: 25 },
+  popularIndex: { fontFamily: font.family.mono, fontSize: 8, color: colors.ink300, letterSpacing: 0.5 },
+  popularName: {
+    fontFamily: font.family.display,
+    fontSize: 19,
+    lineHeight: 21,
+    color: colors.ink900,
+    minHeight: 42,
+  },
+  popularMeta: { fontSize: 9.5, color: colors.ink500 },
+  popularBooked: { ...label('muted'), fontSize: 7, letterSpacing: 1, color: colors.clay },
+
   couponRow: { flexDirection: 'row', alignItems: 'center', gap: space(3), paddingVertical: space(3) },
-  couponRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.ink100 },
-  couponCode: { backgroundColor: colors.brand50, borderColor: colors.brand200, borderWidth: 1, borderStyle: 'dashed', borderRadius: radius.sm, paddingHorizontal: space(2.5), paddingVertical: space(1.5) },
-  couponCodeText: { color: colors.brand700, fontWeight: font.weight.heavy, fontSize: font.size.sm },
+  couponRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
+  couponCode: {
+    backgroundColor: colors.claySoft,
+    borderColor: colors.brand200,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: 6,
+    paddingHorizontal: space(2.5),
+    paddingVertical: space(1.5),
+  },
+  couponCodeText: { fontFamily: font.family.mono, color: colors.brand700, fontSize: 10, letterSpacing: 1 },
   couponTitle: { fontSize: font.size.sm, fontWeight: font.weight.bold, color: colors.ink900 },
-  couponSub: { fontSize: font.size.xs, color: colors.ink500, marginTop: 2 },
+  couponSub: { fontSize: font.size.xs, color: colors.ink500, marginTop: 2, lineHeight: 16 },
+
   statsRow: { flexDirection: 'row', gap: space(3) },
   progressLabel: { fontSize: font.size.xs, color: colors.ink500, marginBottom: space(2) },
+
   paymentRow: { flexDirection: 'row', alignItems: 'center', gap: space(3), paddingVertical: space(3) },
-  paymentTitle: { fontSize: font.size.sm, fontWeight: font.weight.semibold, color: colors.ink800, textTransform: 'capitalize' },
+  paymentTitle: {
+    fontSize: font.size.sm,
+    fontWeight: font.weight.semibold,
+    color: colors.ink800,
+    textTransform: 'capitalize',
+  },
   paymentSub: { fontSize: font.size.xs, color: colors.ink400, marginTop: 2 },
-  paymentAmount: { fontSize: font.size.md, fontWeight: font.weight.bold, color: colors.ink900, marginBottom: space(1) },
-  footnote: { fontSize: font.size.xs, color: colors.ink400, lineHeight: 18, marginTop: space(2) },
+  paymentAmount: { fontFamily: font.family.display, fontSize: 17, color: colors.ink900, marginBottom: space(1) },
+
+  footnote: { fontSize: 9.5, color: colors.ink400, lineHeight: 15, marginTop: space(2) },
 });
