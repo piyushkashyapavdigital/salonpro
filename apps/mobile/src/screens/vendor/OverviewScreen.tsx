@@ -16,7 +16,7 @@ import { useAuth } from '../../shared/auth';
 import { admin, health } from '../../shared/endpoints';
 import { useAsync } from '../../shared/hooks';
 import { Badge, Banner, BarChart, Button, Card, Empty, Loading, Row, SectionTitle, StatTile } from '../../shared/components';
-import { colors, font, gradients, radius, shadow, space, statusColors, STATUS_LABEL } from '../../shared/theme';
+import { colors, font, gradients, label, radius, space, statusColors, STATUS_LABEL } from '../../shared/theme';
 import { formatDate, formatDateLong, formatMoney, formatMoneyShort, formatTime12, isoDate } from '../../core';
 
 export function OverviewScreen() {
@@ -53,7 +53,7 @@ export function OverviewScreen() {
               <Text style={styles.heroDate}>{formatDateLong(date)}</Text>
             </View>
             <Pressable onPress={() => navigation.navigate('WalkIn')} style={styles.walkIn}>
-              <MaterialIcons name="person-add-alt" size={16} color={colors.brand700} />
+              <MaterialIcons name="person-add-alt" size={14} color={colors.ink900} />
               <Text style={styles.walkInText}>Walk-in</Text>
             </Pressable>
           </View>
@@ -231,26 +231,63 @@ function describeIntegrations(flags: {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.canvas },
-  hero: { paddingHorizontal: space(5), paddingTop: space(3), paddingBottom: space(5), borderBottomLeftRadius: 28, borderBottomRightRadius: 28 },
-  heroTop: { flexDirection: 'row', alignItems: 'center', gap: space(3) },
-  heroRole: { color: colors.brand100, fontSize: font.size.xs, textTransform: 'uppercase', letterSpacing: 0.6 },
-  heroName: { color: colors.white, fontSize: font.size.xl, fontWeight: font.weight.heavy, letterSpacing: -0.4 },
-  heroDate: { color: colors.brand200, fontSize: font.size.xs, marginTop: 2 },
-  walkIn: { flexDirection: 'row', alignItems: 'center', gap: space(1), backgroundColor: colors.white, borderRadius: radius.pill, paddingHorizontal: space(3), paddingVertical: space(2) },
-  walkInText: { color: colors.brand700, fontWeight: font.weight.bold, fontSize: font.size.xs },
-  heroStats: { flexDirection: 'row', justifyContent: 'space-between', marginTop: space(5) },
-  heroStatLabel: { color: colors.brand100, fontSize: font.size.xs },
-  heroStatValue: { color: colors.white, fontSize: font.size.xl, fontWeight: font.weight.heavy, marginTop: 2, letterSpacing: -0.5 },
+  hero: {
+    marginHorizontal: space(3),
+    marginTop: space(2),
+    paddingHorizontal: space(5),
+    paddingTop: space(4),
+    paddingBottom: space(5),
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+  },
+  heroTop: { flexDirection: 'row', alignItems: 'flex-start', gap: space(3) },
+  heroRole: { ...label('light'), fontSize: 8, letterSpacing: 1.9 },
+  heroName: {
+    color: colors.paper,
+    fontFamily: font.family.display,
+    fontSize: 34,
+    lineHeight: 36,
+    letterSpacing: -0.8,
+    marginTop: space(1.5),
+  },
+  heroDate: { color: 'rgba(251,248,242,0.48)', fontSize: 8.5, letterSpacing: 1.1, textTransform: 'uppercase', marginTop: space(2) },
+  walkIn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.paper,
+    borderRadius: radius.pill,
+    paddingHorizontal: space(2.5),
+    paddingVertical: space(1.5),
+  },
+  walkInText: { color: colors.ink900, fontWeight: font.weight.bold, fontSize: 7.5, letterSpacing: 0.9, textTransform: 'uppercase' },
+  heroStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: space(5),
+    paddingTop: space(4),
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(251,248,242,0.16)',
+  },
+  heroStatLabel: { ...label('light'), fontSize: 7.5, letterSpacing: 1.3 },
+  heroStatValue: {
+    color: colors.paper,
+    fontFamily: font.family.display,
+    fontSize: 27,
+    lineHeight: 30,
+    marginTop: 2,
+    letterSpacing: -0.4,
+  },
   body: { padding: space(4), gap: space(3) },
   grid: { flexDirection: 'row', gap: space(3) },
   splitRow: { marginTop: space(4), paddingTop: space(3), borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.ink100 },
   rowItem: { flexDirection: 'row', alignItems: 'center', gap: space(3), padding: space(3.5) },
   rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.ink100 },
-  timeBadge: { backgroundColor: colors.brand50, borderRadius: radius.sm, paddingHorizontal: space(2), paddingVertical: space(1) },
-  timeBadgeText: { color: colors.brand700, fontSize: font.size.xs, fontWeight: font.weight.bold },
+  timeBadge: { backgroundColor: colors.canvas, borderRadius: 4, paddingHorizontal: space(2), paddingVertical: space(1) },
+  timeBadgeText: { color: colors.ink800, fontSize: 9, fontWeight: font.weight.bold, letterSpacing: 0.4 },
   rowTitle: { fontSize: font.size.sm, fontWeight: font.weight.semibold, color: colors.ink900 },
   rowMeta: { fontSize: font.size.xs, color: colors.ink500, marginTop: 2 },
   rowAmount: { fontSize: font.size.sm, fontWeight: font.weight.bold, color: colors.ink900 },
-  rank: { width: 26, fontSize: font.size.sm, fontWeight: font.weight.heavy, color: colors.brand600 },
+  rank: { width: 26, fontFamily: font.family.mono, fontSize: 9, color: colors.clay },
   footnote: { fontSize: font.size.xs, color: colors.ink400, lineHeight: 18 },
 });

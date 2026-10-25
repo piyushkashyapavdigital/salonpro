@@ -15,7 +15,7 @@ import { startCheckout } from '../../shared/checkout';
 import { errorMessage, useAsync } from '../../shared/hooks';
 import { useAuth } from '../../shared/auth';
 import { AppSheet, Badge, Banner, Button, Card, Empty, Field, Loading, SectionTitle, StatTile, type SheetRequest } from '../../shared/components';
-import { colors, font, gradients, radius, shadow, space } from '../../shared/theme';
+import { colors, font, gradients, label, radius, shadow, space } from '../../shared/theme';
 import { formatDateTime, formatMoney, formatMoneyShort, rupeesToPaise } from '../../core';
 
 export function WalletScreen() {
@@ -255,13 +255,49 @@ export function WalletScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.canvas },
   body: { paddingBottom: space(12) },
-  hero: { paddingHorizontal: space(5), paddingTop: space(5), paddingBottom: space(7), borderBottomLeftRadius: 30, borderBottomRightRadius: 30 },
-  heroLabel: { color: colors.brand100, fontSize: font.size.xs, textTransform: 'uppercase', letterSpacing: 0.8 },
-  heroValue: { color: colors.white, fontSize: font.size.hero, fontWeight: font.weight.heavy, letterSpacing: -1, marginTop: space(1) },
-  heroSplit: { flexDirection: 'row', gap: space(8), marginTop: space(4), alignItems: 'flex-end' },
-  splitLabel: { color: colors.brand200, fontSize: font.size.xs },
-  splitValue: { color: colors.white, fontSize: font.size.md, fontWeight: font.weight.bold, marginTop: 2 },
-  infoButton: { marginLeft: 'auto', width: 32, height: 32, borderRadius: radius.pill, backgroundColor: '#ffffff26', alignItems: 'center', justifyContent: 'center' },
+  hero: {
+    marginHorizontal: space(3),
+    marginTop: space(2),
+    padding: space(5),
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+  },
+  heroLabel: { ...label('light'), fontSize: 8, letterSpacing: 1.9 },
+  heroValue: {
+    color: colors.paper,
+    fontFamily: font.family.display,
+    fontSize: 46,
+    lineHeight: 48,
+    letterSpacing: -1.2,
+    marginTop: space(2),
+  },
+  heroSplit: {
+    flexDirection: 'row',
+    gap: space(8),
+    marginTop: space(5),
+    paddingTop: space(4),
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(251,248,242,0.16)',
+    alignItems: 'flex-end',
+  },
+  splitLabel: { ...label('light'), fontSize: 7.5, letterSpacing: 1.3 },
+  splitValue: {
+    color: colors.paper,
+    fontFamily: font.family.display,
+    fontSize: 20,
+    lineHeight: 22,
+    marginTop: 2,
+  },
+  infoButton: {
+    marginLeft: 'auto',
+    width: 30,
+    height: 30,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: 'rgba(251,248,242,0.24)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   stack: { padding: space(4), gap: space(3) },
   offerList: { gap: space(2) },
   offerCard: {
